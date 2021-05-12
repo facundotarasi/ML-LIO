@@ -19,7 +19,7 @@ inputs = {
     "n_train_val": 6,
     "test_size"  : 0.2,
     "batch_size" : 2,
-    "nepochs"    : 2,
+    "nepochs"    : 1,
     "Loss": "L1Loss", # esta es la MAE
     "Optimizer": "Adam",
     "lr": 1e-2,

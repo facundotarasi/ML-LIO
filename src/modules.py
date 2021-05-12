@@ -416,10 +416,13 @@ class Atom_Model(pl.LightningModule):
         self.act = nn.PReLU(num_parameters=1,init=0.25)
 
     def forward(self,x):
-        out = self.act(self.fc1(x))
-        #out = self.act(self.fc2(out))
-        #out = self.act(self.fc3(out))
-        out = self.fc4(out)
+        if len(x) != 0:
+            out = self.act(self.fc1(x))
+            #out = self.act(self.fc2(out))
+            #out = self.act(self.fc3(out))
+            out = self.fc4(out)
+        else:
+            out = torch.tensor([])
 
         return out
 
@@ -444,51 +447,74 @@ class Modelo(pl.LightningModule):
         self.train_loss, self.val_loss = [], []
         self.pred, self.real = [], []
 
-    def forward(self, H, C, N):
+    def forward(self, H, C, N, O, Hw):
         out_H = self.Hydrogen(H)
         out_C = self.Carbon(C)
         out_N = self.Nitrogen(N)
+        out_O = self.Oxygen(O)
+        nmol  = Hw.shape[0]
+        out   = torch.zeros(nmol,1)
 
-        out_H = out_H.view(-1,2)
-        out_N = out_N.view(-1,2)
-
-        out = out_H[:,0] + out_H[:,1] + out_C[:,0]
-        out += out_N[:,0] + out_N[:,1]
-
-        # Ahora acumulo las energias para H y N
-        """
-        for ii in range(0,out_H.shape[0],2):
-            H_accum[ii] = out_H[ii+0] + out_H[ii+1]
-            N_accum[ii] = out_N[ii+0] + out_N[ii+1]
+        # Sumo los resultados
+        # Hidrogeno
+        if len(out_H) != 0:
+            start = 0
+            for mol in range(nmol):
+                for at in range(start,start+Hw[mol,0]):
+                    out[mol] += out_H[at]
+                start += Hw[mol,0].item()
         
-        out = out_C + H_accum + N_accum
-        """
-        out = out.view(-1,1)
+        # Carbono
+        if len(out_C) != 0:
+            start = 0
+            for mol in range(nmol):
+                for at in range(start,start+Hw[mol,1]):
+                    out[mol] += out_H[at]
+                start += Hw[mol,1].item()
+
+        # Nitrogeno
+        if len(out_N) != 0:
+            start = 0
+            for mol in range(nmol):
+                for at in range(start,start+Hw[mol,2]):
+                    out[mol] += out_H[at]
+                start += Hw[mol,2].item()
+
+        # Oxigeno
+        if len(out_O) != 0:
+            start = 0
+            for mol in range(nmol):
+                for at in range(start,start+Hw[mol,3]):
+                    out[mol] += out_H[at]
+                start += Hw[mol,3].item()
+
         return out
 
     def training_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch["targets"]
-        H   = batch["Hidrogen"].view(-1,4)
-        C   = batch["Carbon"].view(-1,13)
-        N   = batch["Nitrogen"].view(-1,13)
+        real = batch["T"]
+        H   = batch["H"]
+        C   = batch["C"]
+        N   = batch["N"]
+        O   = batch["O"]
+        Hw  = batch["how_many"]
 
-        pred = self(H,C,N)
+        pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
-        self.log("val_loss",loss,on_epoch=True,on_step=False,prog_bar=True)
+        self.log("train_loss",loss,on_epoch=True,on_step=False,prog_bar=True)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        print(batch.keys())
-        exit(-1)
         # Extraemos inputs y outputs
-        real = batch["targets"]
-        H   = batch["Hidrogen"].view(-1,4)
-        C   = batch["Carbon"].view(-1,13)
-        N   = batch["Nitrogen"].view(-1,13)
+        real = batch["T"]
+        H   = batch["H"]
+        C   = batch["C"]
+        N   = batch["N"]
+        O   = batch["O"]
+        Hw  = batch["how_many"]
 
-        pred = self(H,C,N)
+        pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
         self.log("val_loss",loss,on_epoch=True,on_step=False,prog_bar=True)
 
