@@ -13,20 +13,17 @@ inputs = {
     "seed": 123,
 
     # Directorio de trabajo
-    "path_dir": "/home/gonzalo/Calculos/prueba_Pfitmol/",
+    "path_dir": "/home/gonzalo/Calculos/Datasets/diazirina/",
 
     # Datos para entrenar y validar
-    "n_train_val": 6,
+    "n_train_val": 10000,
     "test_size"  : 0.2,
-    "batch_size" : 2,
-    "nepochs"    : 1,
+    "batch_size" : 100,
+    "nepochs"    : 200,
     "Loss": "L1Loss", # esta es la MAE
     "Optimizer": "Adam",
     "lr": 1e-2,
     "lr_decay": 0.0,
-
-    # Resultados
-    "path_results": "/home/gonzalo/Calculos/prueba_Pfitmol/results/",
 
     # Restarting
     "restart": False,
@@ -34,6 +31,7 @@ inputs = {
 }
 # Nombre del archivo de datos
 inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
+
 # Resultados
 inputs["path_results"] = inputs["path_dir"] + "results/"
 

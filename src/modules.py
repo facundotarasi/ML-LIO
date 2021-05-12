@@ -469,15 +469,15 @@ class Modelo(pl.LightningModule):
             start = 0
             for mol in range(nmol):
                 for at in range(start,start+Hw[mol,1]):
-                    out[mol] += out_H[at]
+                    out[mol] += out_C[at]
                 start += Hw[mol,1].item()
-
+        
         # Nitrogeno
         if len(out_N) != 0:
             start = 0
             for mol in range(nmol):
                 for at in range(start,start+Hw[mol,2]):
-                    out[mol] += out_H[at]
+                    out[mol] += out_N[at]
                 start += Hw[mol,2].item()
 
         # Oxigeno
@@ -485,7 +485,7 @@ class Modelo(pl.LightningModule):
             start = 0
             for mol in range(nmol):
                 for at in range(start,start+Hw[mol,3]):
-                    out[mol] += out_H[at]
+                    out[mol] += out_O[at]
                 start += Hw[mol,3].item()
 
         return out
