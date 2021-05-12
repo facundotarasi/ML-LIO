@@ -393,7 +393,8 @@ class DataModule(pl.LightningDataModule):
 
     def _read_norm(self):
         try:
-            with open("factors_norm.pickle","rb") as f:
+            name = self.path_dir + "factors_norm.pickle"
+            with open(name,"rb") as f:
                 factor_norm = pickle.load(f)
         except:
             print("No se pudo leer el", end=" ")
@@ -522,12 +523,14 @@ class Modelo(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch["targets"]
-        H   = batch["Hidrogen"].view(-1,4)
-        C   = batch["Carbon"].view(-1,13)
-        N   = batch["Nitrogen"].view(-1,13)
+        real = batch["T"]
+        H   = batch["H"]
+        C   = batch["C"]
+        N   = batch["N"]
+        O   = batch["O"]
+        Hw  = batch["how_many"]
 
-        pred = self(H,C,N)
+        pred = self(H,C,N,O,Hw)
 
         for ii in range(pred.shape[0]):
             self.real.append(real[ii].item())
@@ -568,8 +571,8 @@ class Modelo(pl.LightningModule):
         path = self.hparams.path_results
         pred = torch.tensor(self.pred)
         real = torch.tensor(self.real)
-        mean = fact["mean_Exc"]
-        std2 = fact["std_Exc"]
+        mean = fact["T"]["mean"]
+        std2 = fact["T"]["std"]
 
         # Desnormalizamos
         pred = (pred * std2 + mean) * 627.5 # Kcal/mol

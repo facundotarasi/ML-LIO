@@ -12,8 +12,8 @@ inputs = {
     # Seed usada
     "seed": 123,
 
-    # Nombre del archivo de datos
-    "dataset_file": "dataset_PFit.pickle",
+    # Directorio de trabajo
+    "path_dir": "/home/gonzalo/Calculos/Datasets/diazirina/",
 
     # Datos para entrenar y validar
     "n_train_val": 0,
@@ -25,14 +25,17 @@ inputs = {
     "lr": 1e-2,
     "lr_decay": 0.0,
 
-    # Resultados
-    "path_results": "results",
-
     # Modelo
     "restart": False,
-    "model_file": "modelo-val_loss=0.00764.ckpt",
+    "model_file": "modelo-val_loss=0.00765.ckpt",
 
 }
+
+# Nombre del archivo de datos
+inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
+
+# Resultados
+inputs["path_results"] = inputs["path_dir"] + "results/"
 
 Data = mod.DataModule(inputs)
 Data.setup(stage="test")

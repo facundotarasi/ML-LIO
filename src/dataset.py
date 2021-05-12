@@ -10,13 +10,13 @@ energias XC y armamos el DATASET
 #! Por el momento no usa los AEVs, solo P fit
 inputs_pred = {
     # Path donde estan todos los datos
-    "path_P": "/home/gonzalo/Calculos/pruebas_ML_Pfit/dataset/data_point_", 
-    "path_C": "/home/gonzalo/Calculos/pruebas_ML_Pfit/dataset/frames_",
+    "path_P": "/home/gonzalo/Calculos/Datasets/diazirina/data/data_point_", 
+    "path_C": "/home/gonzalo/Calculos/Datasets/diazirina/coordinates/frames_",
     "save_pos": True,
-    "ndata": 6,
+    "ndata": 20000,
 
     # Folder donde guardar todos los resultados
-    "path_results": "/home/gonzalo/Calculos/pruebas_ML_Pfit/"
+    "path_results": "/home/gonzalo/Calculos/Datasets/diazirina/"
 }
 
 # Cargamos los datos y generamos el predictor
