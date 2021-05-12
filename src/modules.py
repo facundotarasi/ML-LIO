@@ -31,34 +31,61 @@ class Dataset(torch.utils.data.Dataset):
         sample = {}
 
         # Real Truth
-        sample["targets"] = torch.tensor(mol["Exc"])
+        sample["T"] = torch.tensor(mol["T"])
 
         # Hidrogeno
-        if how_many[0] != 0:
-            f = mol["Hidrogen"]
-            f = torch.tensor(f).view(how_many[0],-1)
-            sample["Hidrogen"] = f
-
+        sample["H"] = self.get_list(how_many[0],mol["H"])
+        
         # Carbono
-        if how_many[1] != 0:
-            f = mol["Carbon"]
-            f = torch.tensor(f).view(how_many[1],-1)
-            sample["Carbon"] = f
+        sample["C"] = self.get_list(how_many[1],mol["C"])
 
         # Nitrogeno
-        if how_many[2] != 0:
-            f = mol["Nitrogen"]
-            f = torch.tensor(f).view(how_many[2],-1)
-            sample["Nitrogen"] = f
+        sample["N"] = self.get_list(how_many[2],mol["N"])
 
         # Oxigeno
-        if how_many[3] != 0:
-            f = mol["Oxygen"]
-            f = torch.tensor(f).view(how_many[3],-1)
-            sample["Oxygen"] = f
+        sample["O"] = self.get_list(how_many[3],mol["O"])
 
-        # TODO: por el momento creo q no es importante sacar el how_many
+        # TODO How Many: Por el momento lo guardo despues veo
+        # TODO: si es necesario o no
+        sample["how_many"] = torch.tensor(how_many)
+
         return sample
+    
+    def get_list(self,nn,ll):
+        if nn != 0:
+            f = torch.tensor(ll).view(nn,-1)
+        else:
+            f = torch.tensor([])
+        return f
+
+def collate_fn(batch):
+    tmp = {
+        "T": [],
+        "H": [],
+        "C": [],
+        "N": [],
+        "O": [],
+        "how_many": [],
+    }
+    for mol in batch:
+        tmp["T"].append(mol["T"])
+        tmp["how_many"].append(mol["how_many"])
+
+        for key in ["H","C","N","O"]:
+            prop = mol[key]
+            if len(prop) != 0:
+                nat = prop.shape[0]
+                for ii in range(nat):
+                    tmp[key].append(prop[ii,:])
+
+    # En caso de q en el batch ninguna molecula tenga algun atomo
+    for key in tmp:
+        if len(tmp[key]) != 0:
+            tmp[key] = torch.stack(tmp[key],dim=0)
+        else:
+            tmp[key] = torch.tensor([])
+
+    return tmp
 
 # Definicion del DataModule
 class DataModule(pl.LightningDataModule):
@@ -72,6 +99,7 @@ class DataModule(pl.LightningDataModule):
         self.n_train_val = hooks["n_train_val"]
         self.test_size = hooks["test_size"]
         self.batch_size = hooks["batch_size"]
+        self.path_dir = hooks["path_dir"]
 
         # Seteamos la seed
         random.seed(self.seed)
@@ -95,7 +123,7 @@ class DataModule(pl.LightningDataModule):
             # Generamos una array con numeros random
             rand_number = self._get_random()
 
-            # Separamos los datos para train_val y test
+            # Separamos los datos para train_val
             data = self._separate_data(data,rand_number)
 
             # Generamos el dataset para toda la muestra de train_val
@@ -130,15 +158,15 @@ class DataModule(pl.LightningDataModule):
             
     def train_dataloader(self):
         return DataLoader(self.train_ds, batch_size=self.batch_size,
-                          shuffle=True, num_workers=6)
+                          shuffle=True, collate_fn=collate_fn, num_workers=6)
 
     def val_dataloader(self):
         return DataLoader(self.val_ds, batch_size=self.batch_size,
-                          shuffle=False, num_workers=6)
+                          shuffle=False, collate_fn=collate_fn, num_workers=6)
 
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
-                          shuffle=False, num_workers=6)
+                          shuffle=False, collate_fn=collate_fn, num_workers=6)
 
     def _load_data(self):
         print("Leyendo el DataSet...", end=" ")
@@ -167,7 +195,8 @@ class DataModule(pl.LightningDataModule):
 
         # Guardamos los indices de Test
         try:
-            with open("index_test.txt", 'w') as file:
+            name = self.path_dir + "index_test.txt"
+            with open(name, 'w') as file:
                 for ii in range(nin,len(rand)):
                     file.write("%i\n" % rand[ii])
         except:
@@ -177,7 +206,8 @@ class DataModule(pl.LightningDataModule):
         
         # Guardamos los indices de Train y Val
         try:
-            with open("index_train_val.txt", 'w') as file:
+            name = self.path_dir + "index_train_val.txt"
+            with open(name, 'w') as file:
                 for ii in range(0,nin):
                     file.write("%i\n" % rand[ii])
         except:
@@ -198,64 +228,83 @@ class DataModule(pl.LightningDataModule):
 
     def _get_norm(self,data):
         prop = {
-            "targets": [],
-            "Hidrogen": [],
-            "Carbon": [],
-            "Nitrogen": [],
-            "Oxigen": [],
+            "T": [],
+            "H": [],
+            "C": [],
+            "N": [],
+            "O": [],
         }
         for mol in data:
             for key in mol:
-                if key == "targets": 
+                if key == "T": 
                     prop[key].append(mol[key].item())
-                else:
+                elif key != "how_many":
                     for ii in range(mol[key].shape[0]):
                         ff = mol[key][ii].tolist()
                         for jj in range(len(ff)):
                             prop[key].append(ff[jj])
         
-        if len(prop["targets"]) != 0:
-            prop["targets"] = torch.tensor(prop["targets"])
-        if len(prop["Hidrogen"]) != 0:
-            prop["Hidrogen"] = torch.tensor(prop["Hidrogen"]).view(-1,4)
-        if len(prop["Carbon"]) != 0:
-            prop["Carbon"] = torch.tensor(prop["Carbon"]).view(-1,13)
-        if len(prop["Nitrogen"]) != 0:
-            prop["Nitrogen"] = torch.tensor(prop["Nitrogen"]).view(-1,13)
-        if len(prop["Oxigen"]) != 0:
-            prop["Oxigen"] = torch.tensor(prop["Oxigen"]).view(-1,13)
+        # Target
+        if len(prop["T"]) != 0:
+            prop["T"] = torch.tensor(prop["T"])
         else:
-            prop["Oxigen"] = torch.tensor([0.0])
+            print("No hay ningun Real Truth")
+            exit(-1)
+
+        # Hidrogeno
+        if len(prop["H"]) != 0:
+            prop["H"] = torch.tensor(prop["H"]).view(-1,4)
+        else:
+            prop["H"] = torch.tensor([0.])
+
+        # Carbono
+        if len(prop["C"]) != 0:
+            prop["C"] = torch.tensor(prop["C"]).view(-1,13)
+        else:
+            prop["C"] = torch.tensor([0.])
+
+        # Nitrogeno
+        if len(prop["N"]) != 0:
+            prop["N"] = torch.tensor(prop["N"]).view(-1,13)
+        else:
+            prop["N"] = torch.tensor([0.])
+
+        # Oxigeno
+        if len(prop["O"]) != 0:
+            prop["O"] = torch.tensor(prop["O"]).view(-1,13)
+        else:
+            prop["O"] = torch.tensor([0.])
 
         ff = {
-            "targets": {
-                "mean": prop["targets"].mean(dim=0),
-                "std" : prop["targets"].std(dim=0),
+            "T": {
+                "mean": prop["T"].mean(dim=0),
+                "std" : prop["T"].std(dim=0),
             },
-            "Hidrogen": {
-                "mean": prop["Hidrogen"].mean(dim=0),
-                "std" : prop["Hidrogen"].std(dim=0),
+            "H": {
+                "mean": prop["H"].mean(dim=0),
+                "std" : prop["H"].std(dim=0),
             },
-            "Carbon": {
-                "mean": prop["Carbon"].mean(dim=0),
-                "std" : prop["Carbon"].std(dim=0),
+            "C": {
+                "mean": prop["C"].mean(dim=0),
+                "std" : prop["C"].std(dim=0),
             },
-            "Nitrogen": {
-                "mean": prop["Nitrogen"].mean(dim=0),
-                "std" : prop["Nitrogen"].std(dim=0),
+            "N": {
+                "mean": prop["N"].mean(dim=0),
+                "std" : prop["N"].std(dim=0),
             },
-            "Oxigen": {
-                "mean": prop["Oxigen"].mean(dim=0),
-                "std" : prop["Oxigen"].std(dim=0),
+            "O": {
+                "mean": prop["O"].mean(dim=0),
+                "std" : prop["O"].std(dim=0),
             },
         }
 
-        # Escribo en un archivo
+        # Guardo los factores de Norm en un archivo
         try:
-            with open("factors_norm.pickle","wb") as f:
+            name = self.path_dir + "factors_norm.pickle"
+            with open(name,"wb") as f:
                 pickle.dump(ff, f,pickle.HIGHEST_PROTOCOL)
         except:
-            print("No se pudor escribir los",end=" ")
+            print("No se pudo escribir los",end=" ")
             print("factores de normalizacion")
             exit(-1)
 
@@ -265,6 +314,33 @@ class DataModule(pl.LightningDataModule):
         data_norm = []
 
         for mol in data:
+            mol_norm = {}
+
+            # Normalizo el Real Truth
+            Tn = (mol["T"] - fact["T"]["mean"]) / fact["T"]["std"]
+            mol_norm["T"] = Tn
+
+            # Normalizamos los atomos
+            for key in ["H","C","N","O"]:
+                nat = len(mol[key])
+                if nat != 0:
+                    ff = torch.zeros(nat,mol[key].shape[1])
+                    for ii in range(nat):
+                        ff[ii,:] = (mol[key][ii,:]-fact[key]["mean"])
+                        ff[ii,:] /= fact[key]["std"]
+
+                else:
+                    ff = torch.tensor([])
+                
+                mol_norm[key] = ff
+            
+            # Agrego How Many
+            mol_norm["how_many"] = mol["how_many"]
+
+            # Genero el arreglo normalizado
+            data_norm.append(mol_norm)
+
+            """
             # Inicializamos variables
             Exc = torch.zeros(1)
             H = torch.zeros(mol["Hidrogen"].shape[0],
@@ -274,9 +350,6 @@ class DataModule(pl.LightningDataModule):
             N = torch.zeros(mol["Nitrogen"].shape[0],
                             mol["Nitrogen"].shape[1])
 
-            print(fact.keys())
-            print(mol.keys())
-            exit(-1)
 
             Exc  = ( mol["targets"]-fact["mean_Exc"] ) 
             Exc /= fact["std_Exc"]
@@ -300,18 +373,15 @@ class DataModule(pl.LightningDataModule):
                 "Carbon": C,
                 "Nitrogen": N,
             })
-
-        for mol in data:
-            print(mol.keys())
-            print(fact.keys())
-            exit(-1)
+            """
 
         return data_norm
 
     def _read_indices(self):
         numbers = []
+        name = self.path_dir + "index_test.txt"
         try:
-            with open("index_test.txt", 'r') as file:
+            with open(name, 'r') as file:
                 for linea in file:
                     numbers.append(int(linea))
         except:
@@ -334,16 +404,16 @@ class DataModule(pl.LightningDataModule):
 
 # Modelo de cada Atom Types
 class Atom_Model(pl.LightningModule):
-    def __init__(self,nin,nout,Fact):
+    def __init__(self,nin):
         super(Atom_Model, self).__init__()
 
         # Arquitectura de la NN
         self.fc1 = nn.Linear(nin,1000)
         #self.fc2 = nn.Linear(128,128)
         #self.fc3 = nn.Linear(128,64)
-        self.fc4 = nn.Linear(1000,nout)
+        self.fc4 = nn.Linear(1000,1)
 
-        self.act = Fact(num_parameters=1,init=0.25)
+        self.act = nn.PReLU(num_parameters=1,init=0.25)
 
     def forward(self,x):
         out = self.act(self.fc1(x))
@@ -362,10 +432,10 @@ class Modelo(pl.LightningModule):
         self.save_hyperparameters(config)
 
         # Atoms Model
-        self.Hydrogen  = Atom_Model(4, 1,nn.PReLU)
-        self.Carbon    = Atom_Model(13,1,nn.PReLU)
-        self.Nitrogen  = Atom_Model(13,1,nn.PReLU)
-        #self.Oxygen    = Atom_Model(config["nin"],config["nout"],nn.LeakyReLU)
+        self.Hydrogen  = Atom_Model(4)
+        self.Carbon    = Atom_Model(13)
+        self.Nitrogen  = Atom_Model(13)
+        self.Oxygen    = Atom_Model(13)
 
         # Loss Function
         self.err = getattr(nn,self.hparams.Loss)()
@@ -410,6 +480,8 @@ class Modelo(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        print(batch.keys())
+        exit(-1)
         # Extraemos inputs y outputs
         real = batch["targets"]
         H   = batch["Hidrogen"].view(-1,4)

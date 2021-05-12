@@ -12,26 +12,30 @@ inputs = {
     # Seed usada
     "seed": 123,
 
-    # Nombre del archivo de datos
-    "dataset_file": "dataset_PFit.pickle",
+    # Directorio de trabajo
+    "path_dir": "/home/gonzalo/Calculos/prueba_Pfitmol/",
 
     # Datos para entrenar y validar
-    "n_train_val": 10000,
+    "n_train_val": 6,
     "test_size"  : 0.2,
-    "batch_size" : 100,
-    "nepochs"    : 200,
+    "batch_size" : 2,
+    "nepochs"    : 2,
     "Loss": "L1Loss", # esta es la MAE
     "Optimizer": "Adam",
     "lr": 1e-2,
     "lr_decay": 0.0,
 
     # Resultados
-    "path_results": "results",
+    "path_results": "/home/gonzalo/Calculos/prueba_Pfitmol/results/",
 
     # Restarting
     "restart": False,
     "model_file": " ",
 }
+# Nombre del archivo de datos
+inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
+# Resultados
+inputs["path_results"] = inputs["path_dir"] + "results/"
 
 Data = mod.DataModule(inputs)
 Data.setup(stage="fit")
