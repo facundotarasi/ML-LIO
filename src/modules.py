@@ -4,252 +4,20 @@ Este module sirve para entrenar diferentes moleculas, usando
 la densidad de fitting
 """
 
-# Predictor
-import os
 import numpy as np
 import matplotlib.pyplot as plt
-import pickle
 import time
+import pickle
 import random
-
-# DataSet and DataLoader
 import torch
 import pytorch_lightning as pl
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
-
-# Neural Network
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
-# Results
 from scipy import stats
 
-# H C N O
-how_many = [2,1,2,0]
-
-# Esto genera el dataset con el fingerprint
-class Predictor:
-    def __init__(self, inputs=None):
-        self.path = inputs["path"]
-        self.ndata = inputs["ndata"]
-        self.atomic_number = [6,1,1,7,7]
-
-    def setup(self):
-        # Obtenemos las Exc y las Densidades de Fitt
-        data = self._read_files()
-
-        # Obtenemos en que nucleo esta centrado c/elemento
-        # de la densidad de fitting
-        gaussian = self._read_Nuc("Nucd_file.dat")
-
-        # Con esto simetrizamos las funciones p y d
-        # de la densidad de fitting, por lo tanto la dimension se achica
-        data = self._symmetrize(data,gaussian)
-
-        # Separamos en tipo de atomos -> H, C, N, O
-        data = self._separate(data)
-
-        self._save_dataset(data)
-
-        # Esto grafica la distribucion de atomos
-        # de las moleculas en el dataset
-        #self._analysis(geom)
-
-    def _read_files(self):
-        data = []
-        print("Leyendo los archivos...",end=" ")
-        init = time.time()
-        for ii in range(self.ndata):
-            # Leo las Densidades y las Energias
-            file_name = self.path + str(ii+1) + ".dat"
-            single_data = self._read_one_file(file_name)
-
-            # Guardo ambos valores
-            data.append(single_data)
-
-        fin = time.time()
-        print(str(np.round(fin-init,2))+" s.")
-        return data
-    
-    def _read_one_file(self,name):
-        """
-        ? El archivo viene organizado de la siguiente manera
-        ? E1, E2, Exc, Ehf, M, Md
-        ? Pmat, con n_M elementos
-        ? Pmat_fitt, con n_Md elementos
-        * Solo extraigo Exc y Pmat_fitt
-        """
-        n1, Md = 6, 110
-        try:
-            Exc, Pmat_fitt = [], []
-            with open(name) as f:
-                for line in f:
-                    field = line.split()
-
-                    # Con esto leo la 1ra linea (Energias)
-                    if (len(field) == n1):
-                        Exc.append(float(field[2]))
-
-                    # Con esto leo la 3ra linea (Pmat_fitt)
-                    if (len(field) == Md):
-                        for ii in range(Md):
-                            Pmat_fitt.append(float(field[ii]))
-        except:
-            print("El archivo " + name + " no existe")
-            exit(-1) 
-
-        dicc = {
-            "Exc": Exc,
-            "Pmat_fit": Pmat_fitt
-        }
-
-        return dicc
-
-    def _read_Nuc(self,name):
-        """
-        ? El archivo viene organido de la siguiente manera:
-        ?  ns, np, nd
-        ?  Nucd
-        """
-        n1, Md = 3, 110
-        gtype, Nuc = [], []
-        try:
-            Exc, Pmat_fitt = [], []
-            with open(name) as f:
-                for line in f:
-                    field = line.split()
-
-                    # Con esto leo la 1ra linea (Energias)
-                    if (len(field) == n1):
-                        Exc.append(float(field[2]))
-                        gtype.append(int(field[0])) # s
-                        gtype.append(int(field[1])) # p
-                        gtype.append(int(field[2])) # d
-
-                    # Con esto leo la 2da linea con Nucd
-                    if (len(field) == Md):
-                        for ii in range(Md):
-                            Nuc.append(int(field[ii]))
-        except:
-            print("El archivo " + name + " no existe")
-            exit(-1) 
-
-        res = {
-            "type": gtype,
-            "Nucd": Nuc,
-        }
-        return res
-
-    def _symmetrize(self,data,gaussian):
-        # La densidad de fittin esta en orden
-        # primero estan todas las s ( type[0] )
-        # luego estan todas las p ( type[1] )
-        # luego estan todas las d ( type[2] )
-        ns   = gaussian["type"][0]
-        np   = gaussian["type"][1]
-        nd   = gaussian["type"][2]
-
-        data_symm = []
-        for ii in range(len(data)):
-            Exc  = data[ii]["Exc"]
-            Pmat = data[ii]["Pmat_fit"]
-            Pmat_sym = []
-            Nuc_symm  = []
-            new_ns, new_np, new_nd = 0, 0, 0
-
-            # Ponemos las s
-            for jj in range(0,ns):
-                new_ns += 1
-                Nuc_symm.append(gaussian["Nucd"][jj])
-                Pmat_sym.append(Pmat[jj])
-
-            # Simetrizamos las p
-            for jj in range(ns,ns+np,3):
-                temp  = Pmat[jj+0]**2
-                temp += Pmat[jj+1]**2
-                temp += Pmat[jj+2]**2
-                new_np += 1
-                Nuc_symm.append(gaussian["Nucd"][jj])
-                Pmat_sym.append(temp)
-            
-            # Simetrizamos las d
-            for jj in range(ns+np,ns+np+nd,6):
-                temp  = Pmat[jj+0]**2
-                temp += Pmat[jj+1]**2
-                temp += Pmat[jj+2]**2
-                temp += Pmat[jj+3]**2
-                temp += Pmat[jj+4]**2
-                temp += Pmat[jj+5]**2
-                new_nd += 1
-                Nuc_symm.append(gaussian["Nucd"][jj])
-                Pmat_sym.append(temp)
-            
-            data_symm.append({
-                "Exc": Exc,
-                "Pmat_fit": Pmat_sym,
-                "Nucd": Nuc_symm,
-                "Type": [new_ns, new_np, new_nd],
-            })
-
-        return data_symm
-            
-    def _separate(self,data):
-        #* Aclaracion: si usamos la base DZVP para el fitting
-        #* H = (4s, 0p, 0d)
-        #* C = (7s, 3p, 3d)
-        #* N = (7s, 3p, 3d)
-        #* O = (7s, 3p, 3d) ! checkear esta xq la diazi no tiene O
-        data_sep = []
-        at_no = self.atomic_number
-
-        for ii in range(len(data)):
-            Nucd = data[ii]["Nucd"]
-            Pmat = data[ii]["Pmat_fit"]
-            Exc  = data[ii]["Exc"]
-            fH, fC, fN, fO = [], [], [], []
-
-            for jj in range(len(Pmat)):
-                atom_type = at_no[Nucd[jj]-1]
-                if atom_type == 1:
-                    fH.append(Pmat[jj])
-                elif atom_type == 6:
-                    fC.append(Pmat[jj])
-                elif atom_type == 7:
-                    fN.append(Pmat[jj])
-                elif atom_type == 8:
-                    fO.append(Pmat[jj])
-                else:
-                    print("El atom type " + str(atom_type),end=" ")
-                    print("No es posible")
-                    exit(-1)
-            fH = torch.tensor(fH).view(how_many[0],-1)
-            fC = torch.tensor(fC).view(how_many[1],-1)
-            fN = torch.tensor(fN).view(how_many[2],-1)
-            #fO = torch.tensor(fO).view(how_many[3],-1)
-
-            data_sep.append({
-                "Exc": Exc,
-                "Hidrogen": fH,
-                "Carbon": fC,
-                "Nitrogen": fN,
-            })
-        
-        return data_sep
-
-    def _save_dataset(self,data):
-        init = time.time()
-        try:
-            with open("dataset_PFit.pickle","wb") as f:
-                pickle.dump(data,
-                            f,pickle.HIGHEST_PROTOCOL)
-        except:
-            print("No se pudor escribir el",end=" ")
-            print("Dataset AEV")
-            exit(-1)
-        print("Escritura",str(np.round(time.time()-init,2))+" s.")
-
-# Generamos el DataSet
+# Generamos el DataSet: 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self,data):
         self.my_data = data
@@ -259,18 +27,40 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self,idx):
         mol = self.my_data[idx]
-        targets = torch.tensor(mol["Exc"])
+        how_many = mol["how_many"]
+        sample = {}
 
-        sample = {
-            "targets": targets,
-            "Hidrogen": mol["Hidrogen"],
-            "Carbon": mol["Carbon"],
-            "Nitrogen": mol["Nitrogen"],
-        }
+        # Real Truth
+        sample["targets"] = torch.tensor(mol["Exc"])
 
+        # Hidrogeno
+        if how_many[0] != 0:
+            f = mol["Hidrogen"]
+            f = torch.tensor(f).view(how_many[0],-1)
+            sample["Hidrogen"] = f
+
+        # Carbono
+        if how_many[1] != 0:
+            f = mol["Carbon"]
+            f = torch.tensor(f).view(how_many[1],-1)
+            sample["Carbon"] = f
+
+        # Nitrogeno
+        if how_many[2] != 0:
+            f = mol["Nitrogen"]
+            f = torch.tensor(f).view(how_many[2],-1)
+            sample["Nitrogen"] = f
+
+        # Oxigeno
+        if how_many[3] != 0:
+            f = mol["Oxygen"]
+            f = torch.tensor(f).view(how_many[3],-1)
+            sample["Oxygen"] = f
+
+        # TODO: por el momento creo q no es importante sacar el how_many
         return sample
 
-#Definicion del DataModule
+# Definicion del DataModule
 class DataModule(pl.LightningDataModule):
     # Main Methods
     def __init__(self, hooks):
@@ -306,7 +96,6 @@ class DataModule(pl.LightningDataModule):
             rand_number = self._get_random()
 
             # Separamos los datos para train_val y test
-            # * Ahora data tiene solo los datos de train_val
             data = self._separate_data(data,rand_number)
 
             # Generamos el dataset para toda la muestra de train_val
@@ -315,7 +104,6 @@ class DataModule(pl.LightningDataModule):
             # Spliteamos la data en train y val
             train_ds, val_ds = train_test_split(data_ds, 
                        test_size=self.test_size, shuffle=True, random_state=42)
-
 
             # Obtenemos los factores de normalizacion
             self.factor_norm = self._get_norm(train_ds)
@@ -353,6 +141,8 @@ class DataModule(pl.LightningDataModule):
                           shuffle=False, num_workers=6)
 
     def _load_data(self):
+        print("Leyendo el DataSet...", end=" ")
+        init = time.time()
         name = self.data_file
         try:
             with open(name,"rb") as f:
@@ -361,6 +151,9 @@ class DataModule(pl.LightningDataModule):
             print("No se pudo leer el", end=" ")
             print("archivo", name)
             exit(-1)
+        fin = time.time()
+        print(str(np.round(fin-init,2))+" s.")
+        
         return data
 
     def _get_random(self):
@@ -372,8 +165,7 @@ class DataModule(pl.LightningDataModule):
         random.shuffle(rand)
         nin = self.n_train_val
 
-        # guardamos los indices que se van a usar
-        # luego en el test
+        # Guardamos los indices de Test
         try:
             with open("index_test.txt", 'w') as file:
                 for ii in range(nin,len(rand)):
@@ -383,7 +175,7 @@ class DataModule(pl.LightningDataModule):
             print("indices del test")
             exit(-1)
         
-        # Guardamos los indices de train y val para probar cosas
+        # Guardamos los indices de Train y Val
         try:
             with open("index_train_val.txt", 'w') as file:
                 for ii in range(0,nin):
@@ -405,68 +197,57 @@ class DataModule(pl.LightningDataModule):
         return data_cut
 
     def _get_norm(self,data):
-        ntot = len(data)
-        mean_H = torch.zeros(4)
-        mean_C = torch.zeros(13)
-        mean_N = torch.zeros(13)
-        mean_Exc = torch.zeros(1)
-
-        """
-        tmp = []
+        prop = {
+            "targets": [],
+            "Hidrogen": [],
+            "Carbon": [],
+            "Nitrogen": [],
+            "Oxigen": [],
+        }
         for mol in data:
-            var = "Nitrogen"
-            for ii in range(mol[var].shape[0]):
-                for jj in range(mol[var].shape[1]):
-                    tmp.append(mol[var][ii,jj].item())
+            for key in mol:
+                if key == "targets": 
+                    prop[key].append(mol[key].item())
+                else:
+                    for ii in range(mol[key].shape[0]):
+                        ff = mol[key][ii].tolist()
+                        for jj in range(len(ff)):
+                            prop[key].append(ff[jj])
         
-        tmp = torch.tensor(tmp).view(-1,13)
-        print(tmp.mean(dim=0))
-        print(tmp.std(dim=0))
-        """
-
-        # Obtenemos los promedios, en la diazi tengo 2H, 1C, 2N
-        for mol in data:
-            mean_H += mol["Hidrogen"][0,:]
-            mean_H += mol["Hidrogen"][1,:]
-            mean_C += mol["Carbon"][0,:]
-            mean_N += mol["Nitrogen"][0,:]
-            mean_N += mol["Nitrogen"][1,:]
-            mean_Exc += mol["targets"]
-        mean_H /= ntot*2
-        mean_C /= ntot*1
-        mean_N /= ntot*2
-        mean_Exc /= ntot*1
-
-        std_H = torch.zeros(4)
-        std_C = torch.zeros(13)
-        std_N = torch.zeros(13)
-        std_Exc = torch.zeros(1)
-
-        # Obtenemos la desviacion promedio
-        for mol in data:
-            std_H   += ( mol["Hidrogen"][0,:]-mean_H )**2
-            std_H   += ( mol["Hidrogen"][1,:]-mean_H )**2
-            std_C   += ( mol["Carbon"][0,:]-mean_C )**2
-            std_N   += ( mol["Nitrogen"][0,:]-mean_N )**2
-            std_N   += ( mol["Nitrogen"][1,:]-mean_N )**2
-            std_Exc += ( mol["targets"] - mean_Exc )**2
-        std_H /= (ntot*2)
-        std_C /= (ntot*1)
-        std_N /= (ntot*2)
-        std_Exc /= (ntot*1)
+        if len(prop["targets"]) != 0:
+            prop["targets"] = torch.tensor(prop["targets"])
+        if len(prop["Hidrogen"]) != 0:
+            prop["Hidrogen"] = torch.tensor(prop["Hidrogen"]).view(-1,4)
+        if len(prop["Carbon"]) != 0:
+            prop["Carbon"] = torch.tensor(prop["Carbon"]).view(-1,13)
+        if len(prop["Nitrogen"]) != 0:
+            prop["Nitrogen"] = torch.tensor(prop["Nitrogen"]).view(-1,13)
+        if len(prop["Oxigen"]) != 0:
+            prop["Oxigen"] = torch.tensor(prop["Oxigen"]).view(-1,13)
+        else:
+            prop["Oxigen"] = torch.tensor([0.0])
 
         ff = {
-            "mean_Exc": mean_Exc,
-            "std_Exc": torch.sqrt(std_Exc),
-
-            "mean_H": mean_H,
-            "std_H": torch.sqrt(std_H),
-
-            "mean_C": mean_C,
-            "std_C": torch.sqrt(std_C),
-
-            "mean_N": mean_N,
-            "std_N": torch.sqrt(std_N),
+            "targets": {
+                "mean": prop["targets"].mean(dim=0),
+                "std" : prop["targets"].std(dim=0),
+            },
+            "Hidrogen": {
+                "mean": prop["Hidrogen"].mean(dim=0),
+                "std" : prop["Hidrogen"].std(dim=0),
+            },
+            "Carbon": {
+                "mean": prop["Carbon"].mean(dim=0),
+                "std" : prop["Carbon"].std(dim=0),
+            },
+            "Nitrogen": {
+                "mean": prop["Nitrogen"].mean(dim=0),
+                "std" : prop["Nitrogen"].std(dim=0),
+            },
+            "Oxigen": {
+                "mean": prop["Oxigen"].mean(dim=0),
+                "std" : prop["Oxigen"].std(dim=0),
+            },
         }
 
         # Escribo en un archivo
@@ -493,6 +274,10 @@ class DataModule(pl.LightningDataModule):
             N = torch.zeros(mol["Nitrogen"].shape[0],
                             mol["Nitrogen"].shape[1])
 
+            print(fact.keys())
+            print(mol.keys())
+            exit(-1)
+
             Exc  = ( mol["targets"]-fact["mean_Exc"] ) 
             Exc /= fact["std_Exc"]
 
@@ -515,6 +300,11 @@ class DataModule(pl.LightningDataModule):
                 "Carbon": C,
                 "Nitrogen": N,
             })
+
+        for mol in data:
+            print(mol.keys())
+            print(fact.keys())
+            exit(-1)
 
         return data_norm
 
