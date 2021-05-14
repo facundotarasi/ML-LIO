@@ -100,6 +100,7 @@ class DataModule(pl.LightningDataModule):
         self.test_size = hooks["test_size"]
         self.batch_size = hooks["batch_size"]
         self.path_dir = hooks["path_dir"]
+        self.mode = hooks["mode"]
 
         # Seteamos la seed
         random.seed(self.seed)
@@ -141,11 +142,14 @@ class DataModule(pl.LightningDataModule):
             self.val_ds   = self._normalize(val_ds,self.factor_norm)
         
         elif stage == "test":
-            # Leo los indices empleados en test
-            rand_ind = self._read_indices( )
+            if self.mode == "test":
+                # Leo los indices empleados en test
+                rand_ind = self._read_indices( )
 
-            # Cargo los datos de test
-            data = self._separate_data(data,rand_ind)
+                # Cargo los datos de test
+                data = self._separate_data(data,rand_ind)
+            else:
+                print("Mode in: " + self.mode)
 
             # Generamos el dataset para toda la muestra de train_val
             test_ds = Dataset(data)
@@ -386,19 +390,19 @@ class DataModule(pl.LightningDataModule):
                     numbers.append(int(linea))
         except:
             print("No se pudo leer el",end=" ")
-            print("archivo con los indices")
+            print("archivo " + name)
             exit(-1)
         
         return numbers
 
     def _read_norm(self):
+        name = self.path_dir + "factors_norm.pickle"
         try:
-            name = self.path_dir + "factors_norm.pickle"
             with open(name,"rb") as f:
                 factor_norm = pickle.load(f)
         except:
             print("No se pudo leer el", end=" ")
-            print("archivo de normalizacion")
+            print("archivo " + name)
             exit(-1)
         
         return factor_norm

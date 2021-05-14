@@ -13,7 +13,7 @@ inputs = {
     "seed": 123,
 
     # Directorio de trabajo
-    "path_dir": "/home/gonzalo/Calculos/Datasets/diazirina/",
+    "path_dir": "/home/gonzalo/Calculos/Machine_learning/eta_train-met_test/",
 
     # Datos para entrenar y validar
     "n_train_val": 0,
@@ -27,8 +27,10 @@ inputs = {
 
     # Modelo
     "restart": False,
-    "model_file": "modelo-val_loss=0.00765.ckpt",
+    "model_file": "modelo-etano.ckpt",
 
+    # Esta variable indica si estoy testeando o en produccion
+    "mode": "production",
 }
 
 # Nombre del archivo de datos
@@ -47,7 +49,7 @@ inputs["ndata"] = Data.ndata
 path = inputs["path_results"] + "/" 
 path = path + inputs["model_file"]
 try:
-    model = mod.Modelo.load_from_checkpoint(checkpoint_path=path)
+    model = mod.Modelo.load_from_checkpoint(checkpoint_path=path,config=inputs)
 except:
     print("El modelo no se pudo Leer")
     exit(-1)
