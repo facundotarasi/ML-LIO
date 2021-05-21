@@ -9,6 +9,20 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+def read_indices(name):
+    numbers = []
+    try:
+        with open(name, 'r') as file:
+            for linea in file:
+                numbers.append(int(linea))
+    except:
+        print("No se pudo leer el",end=" ")
+        print("archivo " + name)
+        exit(-1)
+        
+    return numbers
+
 def load_data(name):
     try:
         with open(name,"rb") as f:
@@ -72,21 +86,67 @@ def plot_density(datas,inputs,type_at):
     path = inputs["path"] + "dist_dens_" + type_at
     path += ".png"
     plt.savefig(path)
-    plt.show()
     plt.close()
         
+def plot_molecules(datas,inputs):
+    code = inputs["code_name"][0]
+    data = datas[code]
+    ndat = len(data)
+    path = inputs["path"] + "index_train_val.txt"
+    indices = read_indices(path)
 
+    # Aqui la cantidad totales de moleculas y de train_val
+    eje_x = ["etano", "etano_train", "propano", "propano_train"]
+    eje_y = [ndat//2]
+    Ene = []
+    eta_train, pro_train = 0, 0
+    for jj in range(len(indices)):
+        idx = indices[jj]
+        how_many = data[idx]["how_many"]
+        Ene.append(data[idx]["T"][0]*627.5)
+        if how_many[1] == 2:
+            eta_train += 1
+        elif how_many[1] == 3:
+            pro_train += 1
+        else:
+            print("Error solo tiene q haber etano o propano")
+            exit(-1)
+    eje_y.append(eta_train)
+    eje_y.append(ndat//2)
+    eje_y.append(pro_train)
+    plt.bar(eje_x,eje_y)
+    plt.ylabel("# moleculas")
+    plt.xlabel("molecula")
+    path = inputs["path"] + "distribution_molecules.png"
+    plt.savefig(path)
+    plt.close()
+
+    # Graficamos la distribucion de energia
+    hist, bins = np.histogram(Ene,100)
+    plt.title("Energia XC Etano y Propano")
+    plt.plot(bins[:-1],hist,label="datos de Train")
+    plt.xlabel("Energy [Kcal/mol]")
+    plt.ylabel("# molecules")
+    plt.legend()
+    path = inputs["path"] + "Energia_distribucion.png"
+    plt.savefig(path)
+    plt.close()
     
 
+
 inputs = {
-    "code_name": ["etano","metano"],
-    "path": "/home/gonzalo/Calculos/Datasets/analisys/",
+    "code_name": ["etano_propano"],
+    "path": "/home/gonzalo/Calculos/Machine_learning/etano_propano_solo/analysis/",
 }
 
 # Cargamos todos los Datasets
 datas = {}
 for code in inputs["code_name"]:
     datas[code] = load_data(inputs["path"]+"dataset_"+code+".pickle")
+
+# Cuando entrenamos con varias moleculas
+plot_molecules(datas,inputs)
+exit(-1)
 
 # Graficamos una distribucion de la energia
 plot_energy(datas,inputs)

@@ -13,7 +13,7 @@ inputs = {
     "seed": 123,
 
     # Directorio de trabajo
-    "path_dir": "/home/gonzalo/Calculos/Datasets/diazirina/",
+    "path_dir": "/home/gonzalo/Calculos/Machine_learning/etano_propano_solo/",
 
     # Datos para entrenar y validar
     "n_train_val": 10000,
@@ -28,6 +28,10 @@ inputs = {
     # Restarting
     "restart": False,
     "model_file": " ",
+
+    #! Esta variable tiene q estar seteada en test para
+    #! que realize la separacioin de datos
+    "mode": "test",
 }
 # Nombre del archivo de datos
 inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
