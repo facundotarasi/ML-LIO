@@ -13,7 +13,7 @@ inputs = {
     "seed": 123,
 
     # Directorio de trabajo
-    "path_dir": "/home/gonzalo/Calculos/Machine_learning/etano_propano_solo/",
+    "path_dir": "/home/gonzalo/Calculos/Machine_learning/etaprop_train_but_val/",
 
     # Datos para entrenar y validar
     "n_train_val": 10000,
@@ -28,6 +28,13 @@ inputs = {
     # Restarting
     "restart": False,
     "model_file": " ",
+
+    # Validation, 
+    #* in : la validation se realiza con el mismo dataset de train
+    #* out: la validation en el modo train se realiza con un dataset diferente
+    #*      al train
+    "val_options": "out",
+    "val_path": "/home/gonzalo/Calculos/Machine_learning/etaprop_train_but_val/dataset_but.pickle",
 
     #! Esta variable tiene q estar seteada en test para
     #! que realize la separacioin de datos

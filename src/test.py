@@ -13,7 +13,7 @@ inputs = {
     "seed": 123,
 
     # Directorio de trabajo
-    "path_dir": "/home/gonzalo/Calculos/Machine_learning/eta_train-met_test/",
+    "path_dir": "/home/gonzalo/Calculos/Machine_learning/etaprop_train_but_val/",
 
     # Datos para entrenar y validar
     "n_train_val": 0,
@@ -27,14 +27,18 @@ inputs = {
 
     # Modelo
     "restart": False,
-    "model_file": "modelo-etano.ckpt",
+    "model_file": "modelo-val_loss=0.19939.ckpt",
 
     # Esta variable indica si estoy testeando o en produccion
     "mode": "production",
+
+    #! Esto solo es valido para el train, aqui no se usa
+    "val_options": "in",
+    "val_path": "/home/",
 }
 
 # Nombre del archivo de datos
-inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
+inputs["dataset_file"] = inputs["path_dir"] + "dataset_but.pickle"
 
 # Resultados
 inputs["path_results"] = inputs["path_dir"] + "results/"

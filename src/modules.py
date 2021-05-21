@@ -101,6 +101,8 @@ class DataModule(pl.LightningDataModule):
         self.batch_size = hooks["batch_size"]
         self.path_dir = hooks["path_dir"]
         self.mode = hooks["mode"]
+        self.val_options = hooks["val_options"]
+        self.val_path = hooks["val_path"]
 
         # Seteamos la seed
         random.seed(self.seed)
@@ -111,7 +113,7 @@ class DataModule(pl.LightningDataModule):
         print("Setup stage:", stage)
 
         # Leemos los datos en el dataset
-        data = self._load_data( )
+        data = self._load_data(self.data_file)
 
         # Checkeamos dimensiones
         self.ndata = len(data)
@@ -133,6 +135,12 @@ class DataModule(pl.LightningDataModule):
             # Spliteamos la data en train y val
             train_ds, val_ds = train_test_split(data_ds, 
                        test_size=self.test_size, shuffle=True, random_state=42)
+            
+            if self.val_options == "out":
+                print("Validation out of Data Train")
+                nval = len(val_ds)
+                val = self._validation_out(nval)
+                val_ds = Dataset(val)
 
             # Obtenemos los factores de normalizacion
             self.factor_norm = self._get_norm(train_ds)
@@ -172,10 +180,9 @@ class DataModule(pl.LightningDataModule):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
                           shuffle=False, collate_fn=collate_fn, num_workers=6)
 
-    def _load_data(self):
+    def _load_data(self,name):
         print("Leyendo el DataSet...", end=" ")
         init = time.time()
-        name = self.data_file
         try:
             with open(name,"rb") as f:
                 data = pickle.load(f)
@@ -406,6 +413,21 @@ class DataModule(pl.LightningDataModule):
             exit(-1)
         
         return factor_norm
+
+    def _validation_out(self, nval):
+        # Leo el dataset de validation
+        path = self.val_path
+        data = self._load_data(path)
+
+        # Genero la lista de randoms
+        ndata = len(data)
+        random.seed(self.seed)
+        rand = list(range(ndata))
+        random.shuffle(rand)
+        rand = rand[:nval]
+
+        # Extraigo la cantidad necesaria aleatoriamente
+        return self._separate_data(data,rand)
 
 # Modelo de cada Atom Types
 class Atom_Model(pl.LightningModule):
