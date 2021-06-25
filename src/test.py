@@ -1,44 +1,27 @@
 #!/usr/bin/env python3.8
 
 import modules as mod
-import torch
-import os
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import EarlyStopping
 from pytorch_lightning.callbacks import LearningRateMonitor
 import pytorch_lightning as pl
+import argparse
 
-inputs = {
-    # Seed usada
-    "seed": 123,
+# Argumentos
+parser = argparse.ArgumentParser()
+parser.add_argument("-i","--inputs", help="Input file path", action="store")
+args = parser.parse_args()
 
-    # Directorio de trabajo
-    "path_dir": "/home/gonzalo/Calculos/Machine_learning/etaprop_train_but_val/",
+# Checkeamos la correcta ejecucion del programa
+if args.inputs == None:
+    print("Ejecuta el codigo: ./test.py -i path_to_input")
+    exit(-1)
 
-    # Datos para entrenar y validar
-    "n_train_val": 0,
-    "test_size"  : 0.2,
-    "batch_size" : 100,
-    "nepochs"    : 0,
-    "Loss": "L1Loss", # esta es la MAE
-    "Optimizer": "Adam",
-    "lr": 1e-2,
-    "lr_decay": 0.0,
-
-    # Modelo
-    "restart": False,
-    "model_file": "modelo-val_loss=0.19939.ckpt",
-
-    # Esta variable indica si estoy testeando o en produccion
-    "mode": "production",
-
-    #! Esto solo es valido para el train, aqui no se usa
-    "val_options": "in",
-    "val_path": "/home/",
-}
+# Leemos el archivo de input
+inputs = mod.read_input(args.inputs)
 
 # Nombre del archivo de datos
-inputs["dataset_file"] = inputs["path_dir"] + "dataset_but.pickle"
+inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
 
 # Resultados
 inputs["path_results"] = inputs["path_dir"] + "results/"
