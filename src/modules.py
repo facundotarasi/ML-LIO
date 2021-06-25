@@ -16,6 +16,17 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy import stats
+import yaml
+
+# Leemos el yaml file de input
+def read_input(files):
+    try:
+        with open(files, 'r') as f:
+            inp = yaml.load(f,Loader=yaml.FullLoader)
+    except:
+        print("El archivo " + files + " no existe")
+        exit(-1)
+    return inp
 
 # Generamos el DataSet: 
 class Dataset(torch.utils.data.Dataset):
