@@ -1,6 +1,17 @@
 import time
 import numpy as np
 import pickle
+import yaml
+
+# Esto lee el archivo yaml de input
+def read_input(files):
+    try:
+        with open(files, 'r') as f:
+            inp = yaml.load(f,Loader=yaml.FullLoader)
+    except:
+        print("El archivo " + files + " no existe")
+        exit(-1)
+    return inp
 
 # Esto genera el dataset con el fingerprint
 class Predictor:
