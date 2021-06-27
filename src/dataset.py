@@ -8,6 +8,7 @@ En este codigo vamos a leer las densidades de fitting y las
 energias XC y armamos el DATASET
 """
 
+# Argumentos
 parser = argparse.ArgumentParser()
 parser.add_argument("-i","--inputs", help="Input file path", action="store")
 args = parser.parse_args()

@@ -1,7 +1,9 @@
 import time
 import numpy as np
 import pickle
+import numpy as np
 import yaml
+from matplotlib import pyplot as plt
 
 # Esto lee el archivo yaml de input
 def read_input(files):
@@ -22,6 +24,17 @@ class Predictor:
         self.ndata = inputs["ndata"]
         self.path_results = inputs["path_results"]
 
+        # AEV variables
+        self.cutoff_rad = inputs["cutoff_rad"]
+        self.cutoff_ang = inputs["cutoff_ang"]
+        self.nradial    = inputs["nradial"]
+        self.nangular   = inputs["nangular"]
+        self.radial_Rs  = inputs["radial_Rs"]
+        self.radial_etha= inputs["radial_etha"]
+        self.angular_Rs = inputs["angular_Rs"]
+        self.angular_etha=inputs["angular_etha"]
+        self.angular_tetha=inputs["angular_tetha"]
+
     def setup(self):
         # Leemos Coordenadas, Pfit, Exc, Nuc, type, how_many
         data = self._read_files()
@@ -32,6 +45,10 @@ class Predictor:
 
         # Separamos en tipo de atomos -> H, C, N, O
         data = self._separate(data)
+
+        # Generamos los AEV de posiciones
+        data = self._get_AEVs(data)
+        exit(-1)
 
         # Guardamos el dataset
         self._save_dataset(data)
@@ -201,6 +218,7 @@ class Predictor:
                 "Pmat_fit": Pmat_sym,
                 "Nuc": Nuc_sym,
                 "Atomic_number": data[ii]["atomic_number"],
+                "Positions": data[ii]["positions"],
                 "How_many": data[ii]["how_many"],
             })
 
@@ -219,9 +237,19 @@ class Predictor:
             Nucd  = mol["Nuc"]
             Pmat  = mol["Pmat_fit"]
             Exc   = mol["Targets"]
+            Pos   = mol["Positions"]
             fH, fC, fN, fO = [], [], [], []
 
             # Separamos la Pfit en cada atom type
+            # TODO:
+            #! BUG: pa H funciona bien, para otros no
+            #! asi como esta, pone las s de C1 1ro
+            #! luego las s de C2, luego p de C1 y 
+            #! luego las p de C2, en tonces en modules
+            #! get_list cuando splitea pa atomos
+            #! un atomo tiene todas las s de 1 y 2
+            #! y el otro atomo todas las p de 1 y 2 
+            #! (mas o menos)
             for jj in range(len(Pmat)):
                 atom_idx = Nucd[jj] - 1
                 atom_type = at_no[atom_idx]
@@ -244,6 +272,8 @@ class Predictor:
                 "C": fC,
                 "N": fN,
                 "O": fO,
+                "Pos": Pos,
+                "atn": at_no,
                 "how_many": mol["How_many"],
             })
         
@@ -261,3 +291,311 @@ class Predictor:
             print("Dataset AEV")
             exit(-1)
         print("Escritura",str(np.round(time.time()-init,2))+" s.")
+
+    def _get_AEVs(self,data):
+        print(data[0].keys())
+        # Primero ponemos las posiciones en el orden
+        # H, C, N, O
+        # data_aev: contiene todo lo necesario para
+        #           generar AEVs de posiciones
+        data_aev = self._sorting(data)
+
+        # Obtengo las distancias
+        data_aev = self._distances(data_aev)
+
+        # Obtengo los cutoffs
+        data_aev = self._get_cutoffs(data_aev)
+
+        # Generamos los fingerprints de cada atomo
+        # en cada molecula
+        data_aev = self._fingerprint(data_aev)
+
+        return data
+
+    def _sorting(self,data):
+        data_aev = []
+        for mol in data:
+            # Listas
+            atno = mol["atn"]
+            pos  = mol["Pos"]
+            Hw   = mol["how_many"]
+            nat  = len(atno)
+
+            # Numpy arrays
+            np_atno = np.array(atno)
+            np_pos  = np.array(pos)
+            atno_s  = np.zeros((nat),dtype=np.int32)
+            pos_s   = np.zeros((nat,3))
+
+            # Sorting
+            sort_idx = np.argsort(np_atno)
+            for ii in range(nat):
+                idx = sort_idx[ii]
+                atno_s[ii] = np_atno[idx]
+                pos_s[ii,:] = np_pos[idx,:]
+            
+            data_aev.append({
+                "Atno": atno_s,
+                "Pos" : pos_s,
+                "How_many": Hw,
+            })
+
+        return data_aev
+
+    def _distances(self,data):
+        for ii in range(len(data)):
+            mol = data[ii]
+            nat = len(mol["Atno"])
+            dist = np.empty((nat,nat))
+            for jj in range(nat):
+                dist[jj,jj] = 0.
+                for kk in range(jj+1,nat):
+                    at_j = mol["Pos"][jj,:]
+                    at_k = mol["Pos"][kk,:]
+                    diff = at_j - at_k
+                    diff = np.sum(diff**2)
+                    dist[jj,kk] = np.sqrt(diff)
+                    dist[kk,jj] = np.sqrt(diff)
+            data[ii]["Dist"] = dist
+        return data
+
+    def _get_cutoffs(self, data):
+        for ii in range(len(data)):
+            mol = data[ii]["Dist"]
+            nat = len(data[ii]["Atno"])
+            Fc_rad = np.empty((nat,nat))
+            Fc_ang = np.empty((nat,nat))
+            for jj in range(nat):
+                Fc_rad[jj,jj] = 0.
+                Fc_ang[jj,jj] = 0.
+                for kk in range(jj+1,nat):
+                    dist = mol[jj,kk]
+                    fc_rad, fc_ang = self._single_cutoff(dist)
+                    Fc_rad[jj,kk] = fc_rad
+                    Fc_rad[kk,jj] = fc_rad
+                    Fc_ang[jj,kk] = fc_ang
+                    Fc_ang[kk,jj] = fc_ang
+
+            data[ii]["Fc_rad"] = Fc_rad
+            data[ii]["Fc_ang"] = Fc_ang
+        return data
+
+    def _single_cutoff(self,dd):
+        Rc_rad = self.cutoff_rad
+        Rc_ang = self.cutoff_ang
+        pi = np.pi
+
+        # Radial Cutoff
+        if dd > Rc_rad:
+            fc_rad = 0.
+        else:
+            fc_rad = 0.5 * np.cos(pi*dd/Rc_rad) + 0.5
+        
+        # Angular Cutoff
+        if dd > Rc_ang:
+            fc_ang = 0.
+        else:
+            fc_ang = 0.5 * np.cos(pi*dd/Rc_ang) + 0.5
+        
+        return fc_rad, fc_ang
+
+    def _fingerprint(self,data):
+        #TODO: CHECKEAR LA CUENTA X FAVOR DE LOS FG
+        # Checkeamos dimensiones de gaussianas
+        nang = len(self.angular_Rs)*len(self.angular_tetha)
+        if self.nradial != len(self.radial_Rs):
+            print("La cantidad de gaussianas es diferente a",end=" ")
+            print("la dimension Rs radial")
+            exit(-1)
+        elif self.nangular != nang:
+            print("La cantidad de gaussianas es diferente a",end=" ")
+            print("la dimension Rs y tetha angular")
+            exit(-1)
+        
+        # Dimension del AEV
+        #! A esto hay que agregarla la cantidad de densidades luego
+        total_gauss = 4 * self.nradial + 10 * self.nangular
+        t_acum = 0.
+
+        # Barremos todas las moleculas en el dataset
+        print("data_aev:",data[0].keys())
+        for mm in range(len(data)):
+            mol = data[mm]
+            nat = len(mol["Atno"])
+            mol_fg = np.empty((nat,total_gauss))
+
+            # Barremos todos los atomos en la molecula
+            for at in range(nat):
+                # Obtenemos las contribuciones radiales
+                fg_rad = self._get_fg_radial(mol,self.radial_Rs,
+                               self.radial_etha,at,nat)
+
+                # Obtenemos las contribuciones angulares
+                fg_ang = self._get_fg_angular(mol,self.angular_Rs,
+                               self.angular_tetha,at,nat)
+
+                # Guardamos ambas contribuciones en el fg
+                mol_fg[at,:] = np.concatenate((fg_rad,fg_ang))
+
+                """
+                #* Esto es solo para graficar los fg
+                plt.plot(mol_fg[at,:],"x-",label=str(mol["Atno"][at]))
+                plt.xticks(range(0,128,8))
+                plt.legend()
+                plt.show()
+                plt.close()
+                exit(-1)
+                """
+            data[mm]["AEV"] = mol_fg
+        return data
+
+    def _get_fg_radial(self,mol,Rs,etha,idx_at,nat):
+        # El orden de la parte radial es:
+        # H, C, N, O
+        ngauss = self.nradial
+        fg   = np.zeros((4,ngauss))
+        Zat  = mol["Atno"]
+        dist = mol["Dist"]
+        Fc   = mol["Fc_rad"]
+        how_many = mol["How_many"]
+
+        # Barremos todas las gaussianas
+        for gau in range(ngauss):
+            start = 0
+            # Barremos todos los atom types
+            for at_type in range(4):
+                # Barremos todos los atomos dentro de ese type
+                for kk in range(start,start+how_many[at_type]):
+                    if idx_at == kk:
+                        continue
+                    # Calculamos la parte radial
+                    val = (dist[idx_at,kk]-Rs[gau])**2 * etha
+                    val = np.exp(-val) * Fc[idx_at,kk]
+                    fg[at_type,gau] += val
+                start += how_many[at_type]
+        fg = fg.reshape((4*ngauss))
+        return fg
+
+    def _get_fg_angular(self,mol,Rs,tetha,idx_at,nat):
+        # El orden de la parte angular es
+        # HH, HC, HN, HO, CC, CN, CO, NN, NO, OO
+        ngauss = self.nangular
+        fg   = np.zeros((10,ngauss))
+        Zat  = mol["Atno"]
+        dist = mol["Dist"]
+        pos  = mol["Pos"]
+        Fc   = mol["Fc_ang"]
+        etha_ang = self.angular_etha
+        etha_rad = self.radial_etha
+        how_many = mol["How_many"]
+
+        # Obtenemos la matriz de angulas X - idx_at - Y
+        Ang = self._get_angles(dist,pos,Zat,idx_at)
+
+        # TODO: esto hay que hacerlo en el init, esta operacion
+        # TODO: es la misma pa todos los atomos en todas las molec.
+        # Metemos todos los parametros de la parte angular
+        # en una sola lista
+        gauss_param = []
+        for ii in range(len(Rs)):
+            for jj in range(len(tetha)):
+                lista = [Rs[ii],tetha[jj]]
+                gauss_param.append(lista)
+        if (len(gauss_param)) != ngauss:
+            print("Error en la lista de parametros y la ",end=" ")
+            print("cantidad de gaussianas")
+            exit(-1)
+        
+        # Barremos las gaussianas
+        for gi in range(len(gauss_param)):
+            start_i, start_j = 0, 0
+            ang_type = 0
+            p_Rs = gauss_param[gi][0]
+            p_tetha = gauss_param[gi][1]
+            # Barremos el primer atom type
+            for at_i in range(4):
+                # Barremos el segundo atom type
+                for at_j in range(at_i,4):
+                    # Barremos los atomos dentro de type i
+                    for ii in range(0,how_many[at_i]):
+                        ii_x = start_i + ii
+                        if idx_at == ii_x:
+                            continue
+                        init = 0
+                        if at_i == at_j:
+                            init = ii+1
+                        # Barremos los atomos dentro de type j
+                        for jj in range(init,how_many[at_j]):
+                            jj_x = start_j + jj
+                            if idx_at == jj_x:
+                                continue
+
+                            # Primer Termino
+                            term_1 = np.cos(Ang[ii_x,jj_x]-p_tetha)
+                            term_1 = (term_1 + 1.)**etha_ang
+
+                            # Segundo Termino
+                            term_2 = dist[idx_at,ii_x] + dist[idx_at,jj_x]
+                            term_2 = ((term_2/2.)-p_Rs)**2
+                            term_2 = np.exp(-etha_rad*term_2)
+
+                            # Final Termino
+                            final = Fc[idx_at,ii_x]*Fc[idx_at,jj_x]
+                            final = term_1 * term_2 * final
+                            final = 2.**(1.-etha_ang) * final
+
+                            # Acumulo 
+                            fg[ang_type,gi] += final
+
+                    start_j  += how_many[at_j]
+                    ang_type += 1
+                start_i += how_many[at_i]
+                start_j  = how_many[at_i]
+        
+        fg = fg.reshape(10*ngauss)
+        return fg
+
+    def _get_angles(self,dist,pos,Zat,idx_at):
+        # Formula: cos alfa = (a*b)/ (|a|*|a|)
+        nat = len(Zat)
+        mat = np.zeros((nat,nat))
+        for ii in range(nat):
+            if ii == idx_at:
+                continue
+            for jj in range(ii+1,nat):
+                if jj == idx_at:
+                    continue
+                # vector idx_at - ii
+                list_i = [pos[idx_at,0]-pos[ii,0]]
+                list_i.append(pos[idx_at,1]-pos[ii,1])
+                list_i.append(pos[idx_at,2]-pos[ii,2])
+                vec_i = np.array(list_i)
+
+                # vector idx_at - jj
+                list_j = [pos[idx_at,0]-pos[jj,0]]
+                list_j.append(pos[idx_at,1]-pos[jj,1])
+                list_j.append(pos[idx_at,2]-pos[jj,2])
+                vec_j = np.array(list_j)
+
+                numerator = (vec_i*vec_j).sum()
+                denominator = dist[idx_at,ii]*dist[idx_at,jj]
+                val = numerator / denominator
+                mat[ii,jj] = np.arccos(val)
+                mat[jj,ii] = np.arccos(val)
+                # esta en radianes, para pasar a grados hay x 57.2958
+        return mat
+
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
