@@ -44,11 +44,15 @@ class Predictor:
         data = self._symmetrize(data)
 
         # Separamos en tipo de atomos -> H, C, N, O
+        # De esta data solo vamos a usar fdens, ya esta sorteada
+        # en el orden correcto
         data = self._separate(data)
 
         # Generamos los AEV de posiciones
-        data = self._get_AEVs(data)
-        exit(-1)
+        data_aev = self._get_AEVs(data)
+
+        # Aqui generamos la union del AEV con las densidades
+        data = self._join_data(data,data_aev)
 
         # Guardamos el dataset
         self._save_dataset(data)
@@ -240,38 +244,29 @@ class Predictor:
             Pos   = mol["Positions"]
             fH, fC, fN, fO = [], [], [], []
 
-            # Separamos la Pfit en cada atom type
-            # TODO:
-            #! BUG: pa H funciona bien, para otros no
-            #! asi como esta, pone las s de C1 1ro
-            #! luego las s de C2, luego p de C1 y 
-            #! luego las p de C2, en tonces en modules
-            #! get_list cuando splitea pa atomos
-            #! un atomo tiene todas las s de 1 y 2
-            #! y el otro atomo todas las p de 1 y 2 
-            #! (mas o menos)
+            # genero el array que tiene las gaussianas separados x atomos
+            nat = len(at_no)
+            ff, ffsor = [], []
+            for ii in range(nat):
+                ff.append([])
+                ffsor.append([])
+
             for jj in range(len(Pmat)):
-                atom_idx = Nucd[jj] - 1
-                atom_type = at_no[atom_idx]
-                if atom_type == 1:
-                    fH.append(Pmat[jj])
-                elif atom_type == 6:
-                    fC.append(Pmat[jj])
-                elif atom_type == 7:
-                    fN.append(Pmat[jj])
-                elif atom_type == 8:
-                    fO.append(Pmat[jj])
-                else:
-                    print("El atom type " + str(atom_type),end=" ")
-                    print("No es posible")
-                    exit(-1)
+                at_idx = Nucd[jj] - 1
+                ff[at_idx].append(Pmat[jj])
+            
+            # ff tiene dimensiones [nat][ngauss sime]
+            # Ahora realizamos el sorting
+            np_atno = np.array(at_no)
+            sort_idx = np.argsort(np_atno)
+            for ii in range(nat):
+                ii_s = sort_idx[ii]
+                for jj in range(len(ff[ii_s])):
+                    ffsor[ii].append(ff[ii_s][jj])
 
             data_sep.append({
                 "T": Exc,
-                "H": fH,
-                "C": fC,
-                "N": fN,
-                "O": fO,
+                "fdens": ffsor,
                 "Pos": Pos,
                 "atn": at_no,
                 "how_many": mol["How_many"],
@@ -287,13 +282,12 @@ class Predictor:
                 pickle.dump(data,
                             f,pickle.HIGHEST_PROTOCOL)
         except:
-            print("No se pudor escribir el",end=" ")
+            print("No se pudo escribir el",end=" ")
             print("Dataset AEV")
             exit(-1)
         print("Escritura",str(np.round(time.time()-init,2))+" s.")
 
     def _get_AEVs(self,data):
-        print(data[0].keys())
         # Primero ponemos las posiciones en el orden
         # H, C, N, O
         # data_aev: contiene todo lo necesario para
@@ -310,7 +304,7 @@ class Predictor:
         # en cada molecula
         data_aev = self._fingerprint(data_aev)
 
-        return data
+        return data_aev
 
     def _sorting(self,data):
         data_aev = []
@@ -418,7 +412,6 @@ class Predictor:
         t_acum = 0.
 
         # Barremos todas las moleculas en el dataset
-        print("data_aev:",data[0].keys())
         for mm in range(len(data)):
             mol = data[mm]
             nat = len(mol["Atno"])
@@ -585,7 +578,30 @@ class Predictor:
                 # esta en radianes, para pasar a grados hay x 57.2958
         return mat
 
+    def _join_data(self,data,data_aev):
+        data_new = []
+        if len(data) != len(data_aev):
+            print("Los 2 datasets difieren en tamaño")
+            exit(-1)
 
+        for ii in range(len(data)):
+            mol1 = data[ii]
+            mol2 = data_aev[ii]
+            fg_mol = []
+            ele = {}
+            ele["T"] = mol1["T"]
+            ele["Atno"] = mol2["Atno"].tolist()
+            ele["How_many"] = mol2["How_many"]
+            nat = len(mol2["Atno"])
+            # Generamos el fg pa cada atomo en la molecula
+            for jj in range(nat):
+                ff = np.array(mol1["fdens"][jj])
+                fg_at = np.concatenate((mol2["AEV"][jj],ff))
+                fg_mol.append(fg_at.tolist())
+            ele["Fg"] = fg_mol
+            data_new.append(ele)
+
+        return data_new
         
 
 
