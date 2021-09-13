@@ -38,23 +38,38 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self,idx):
         mol = self.my_data[idx]
-        how_many = mol["how_many"]
+        how_many = mol["How_many"]
+        atomic = mol["Atno"]
         sample = {}
+        fH, fC, fN, fO = [], [], [], [] 
 
         # Real Truth
         sample["T"] = torch.tensor(mol["T"])
 
+        for jj in range(len(atomic)):
+            if atomic[jj] == 1:
+                fH.append(mol["Fg"][jj])
+            elif atomic[jj] == 6:
+                fC.append(mol["Fg"][jj])
+            elif atomic[jj] == 7:
+                fN.append(mol["Fg"][jj])
+            elif atomic[jj] == 8:
+                fO.append(mol["Fg"][jj])
+            else:
+                print("Sólo se permiten los elmentos CHON")
+                exit(-1)
+        
         # Hidrogeno
-        sample["H"] = self.get_list(how_many[0],mol["H"])
+        sample["H"] = torch.tensor(fH)
         
         # Carbono
-        sample["C"] = self.get_list(how_many[1],mol["C"])
+        sample["C"] = torch.tensor(fC)
 
         # Nitrogeno
-        sample["N"] = self.get_list(how_many[2],mol["N"])
+        sample["N"] = torch.tensor(fN)
 
         # Oxigeno
-        sample["O"] = self.get_list(how_many[3],mol["O"])
+        sample["O"] = torch.tensor(fO)
 
         # TODO How Many: Por el momento lo guardo despues veo
         # TODO: si es necesario o no
@@ -62,12 +77,17 @@ class Dataset(torch.utils.data.Dataset):
 
         return sample
     
+    """
+    # Esta función no aplica para la forma actual del Dataset.
+    # De todas formas no estoy seguro de si mi propuesta es la más eficiente
+    # (Probablemente no)
     def get_list(self,nn,ll):
         if nn != 0:
             f = torch.tensor(ll).view(nn,-1)
         else:
             f = torch.tensor([])
         return f
+    """
 
 def collate_fn(batch):
     tmp = {
@@ -114,6 +134,9 @@ class DataModule(pl.LightningDataModule):
         self.mode = hooks["mode"]
         self.val_options = hooks["val_options"]
         self.val_path = hooks["val_path"]
+        self.coeff = hooks["coeff"]
+        self.proj = hooks["proj"]
+        self.AEV = hooks["AEV"]
 
         # Seteamos la seed
         random.seed(self.seed)

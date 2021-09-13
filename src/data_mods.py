@@ -1,7 +1,6 @@
 import time
 import numpy as np
 import pickle
-import numpy as np
 import yaml
 from matplotlib import pyplot as plt
 
@@ -23,17 +22,21 @@ class Predictor:
         self.save_pos = inputs["save_pos"]
         self.ndata = inputs["ndata"]
         self.path_results = inputs["path_results"]
+        self.coeff = inputs["coeff"]
+        self.proj = inputs["proj"]
+        self.AEV = inputs["AEV"]
 
         # AEV variables
-        self.cutoff_rad = inputs["cutoff_rad"]
-        self.cutoff_ang = inputs["cutoff_ang"]
-        self.nradial    = inputs["nradial"]
-        self.nangular   = inputs["nangular"]
-        self.radial_Rs  = inputs["radial_Rs"]
-        self.radial_etha= inputs["radial_etha"]
-        self.angular_Rs = inputs["angular_Rs"]
-        self.angular_etha=inputs["angular_etha"]
-        self.angular_tetha=inputs["angular_tetha"]
+        if self.AEV:
+            self.cutoff_rad = inputs["cutoff_rad"]
+            self.cutoff_ang = inputs["cutoff_ang"]
+            self.nradial    = inputs["nradial"]
+            self.nangular   = inputs["nangular"]
+            self.radial_Rs  = inputs["radial_Rs"]
+            self.radial_etha= inputs["radial_etha"]
+            self.angular_Rs = inputs["angular_Rs"]
+            self.angular_etha=inputs["angular_etha"]
+            self.angular_tetha=inputs["angular_tetha"]
 
     def setup(self):
         # Leemos Coordenadas, Pfit, Exc, Nuc, type, how_many
@@ -49,10 +52,14 @@ class Predictor:
         data = self._separate(data)
 
         # Generamos los AEV de posiciones
-        data_aev = self._get_AEVs(data)
+        if self.AEV: data_aev = self._get_AEVs(data)
 
         # Aqui generamos la union del AEV con las densidades
-        data = self._join_data(data,data_aev)
+        if self.AEV: data = self._join_data(data,data_aev)
+
+        # Si los AEV están desactivados, formateamos el Dataset
+        # Para que conserve la misma forma
+        if not self.AEV: data = self._format_data(data)
 
         # Guardamos el dataset
         self._save_dataset(data)
@@ -68,16 +75,18 @@ class Predictor:
 
         for ii in range(self.ndata):
             # Leo las coordenadas y el numero atomico
-            file_name = self.path_C + str(ii+1) + ".xyz"
+            # IMPORTANTE: Por ahora, lo dejo sólo con etano para hacer pruebitas
+            file_name = self.path_C + "etano_" + str(ii+1) + ".xyz"
             atomic_number, positions, how_many = self._read_xyz(file_name)
 
-            # Leo Densidades, Energia XC, type gaussians y Nuc
-            file_name = self.path_P + str(ii+1) + ".dat"
-            Exc, Pmat_fit, gtype, Nuc = self._read_rhoE(file_name)
+            # Leo los descriptores elegidos
+            # IMPORTANTE: Por ahora, lo dejo sólo con etano para hacer pruebitas
+            file_name = self.path_P + "etano_" + str(ii+1) + ".dat"
+            KinE, Pmat_fit, gtype, Nuc, proj = self._read_rhoE(file_name)
 
             # Guardo los datos en un solo diccionario
             single_data = {
-                "targets": Exc,
+                "targets": KinE,
                 "atomic_number": atomic_number,
                 "how_many": how_many,
                 "Pmat_fit": Pmat_fit,
@@ -87,6 +96,9 @@ class Predictor:
 
             if len(positions) != 0:
                 single_data["positions"] = positions
+
+            if self.proj:
+                single_data["proj"] = proj
             
             # Guardo los datos de una molecula
             data.append(single_data)
@@ -135,14 +147,15 @@ class Predictor:
     def _read_rhoE(self,name):
         """
         ? El archivo viene organizado de la siguiente manera:
-        ? E1, E2, Exc, En, Etot, M, Md
+        ? E1, KinE, Exc, En, Etot, M, Md
         ? nshelld: s, p, d, -, -,
         ? Nucd
         ? Pmat, con n_M elementos
-        ? Pmat_fitt, con n_Md elementos
+        ? coeff, con n_Md elementos (en lio son los af)
+        ? proj, con n_Md elementos
         """
         try:
-            Exc, Pmat_fit = [], []
+            KinE, Pmat_fit, proj = [], [], []
             gtype, Nuc = [], []
             Md = -1
             with open(name) as f:
@@ -151,9 +164,9 @@ class Predictor:
                     nlines += 1
                     field = line.split()
 
-                    # Leo la 1ra linea: saco Exc
+                    # Leo la 1ra linea: saco KinE
                     if len(field) == 7:
-                        Exc.append(float(field[2]))
+                        KinE.append(float(field[1]))
                         Md = int(field[-1])
 
                     # Leo la 2da linea: tipos de gaussianas
@@ -170,11 +183,16 @@ class Predictor:
                         elif nlines == 5:
                             for ii in range(Md):
                                 Pmat_fit.append(float(field[ii]))
+                        # Leo la 6ta línea: proj
+                        elif nlines == 6:
+                            for ii in range(Md):
+                                proj.append(float(field[ii]))
+        
         except:
             print("El archivo " + name + " no existe")
             exit(-1) 
 
-        return Exc, Pmat_fit, gtype, Nuc
+        return KinE, Pmat_fit, gtype, Nuc, proj
 
     def _symmetrize(self,data):
         # La densidad de fitting esta en orden
@@ -182,20 +200,25 @@ class Predictor:
         # luego estan todas las p ( type[1] )
         # luego estan todas las d ( type[2] )
 
+        print("Simetrizando los coeficientes de la base...")
         data_symm = []
         for ii in range(len(data)):
             ns   = data[ii]["gtype"][0]
             np   = data[ii]["gtype"][1]
             nd   = data[ii]["gtype"][2]
 
-            Exc  = data[ii]["targets"]
+            KinE  = data[ii]["targets"]
             Pmat = data[ii]["Pmat_fit"]
+            if self.proj: 
+                proj = data[ii]["proj"]
+                proj_sym = []
             Pmat_sym, Nuc_sym = [], []
 
             # Ponemos las s
             for jj in range(0,ns):
                 Nuc_sym.append(data[ii]["Nuc"][jj])
                 Pmat_sym.append(Pmat[jj])
+                if self.proj: proj_sym.append(proj[jj])
 
             # Simetrizamos las p
             for jj in range(ns,ns+np,3):
@@ -204,6 +227,11 @@ class Predictor:
                 temp += Pmat[jj+2]**2
                 Nuc_sym.append(data[ii]["Nuc"][jj])
                 Pmat_sym.append(temp)
+                if self.proj:
+                    temp  = proj[jj+0]**2
+                    temp += proj[jj+1]**2
+                    temp += proj[jj+2]**2
+                    proj_sym.append(temp)
             
             # Simetrizamos las d
             for jj in range(ns+np,ns+np+nd,6):
@@ -215,16 +243,26 @@ class Predictor:
                 temp += Pmat[jj+5]**2
                 Nuc_sym.append(data[ii]["Nuc"][jj])
                 Pmat_sym.append(temp)
+                if self.proj:
+                    temp  = proj[jj+0]**2
+                    temp += proj[jj+1]**2
+                    temp += proj[jj+2]**2
+                    temp += proj[jj+3]**2
+                    temp += proj[jj+4]**2
+                    temp += proj[jj+5]**2
+                    proj_sym.append(temp)
 
             
             data_symm.append({
-                "Targets": Exc,
+                "Targets": KinE,
                 "Pmat_fit": Pmat_sym,
                 "Nuc": Nuc_sym,
                 "Atomic_number": data[ii]["atomic_number"],
                 "Positions": data[ii]["positions"],
                 "How_many": data[ii]["how_many"],
             })
+
+            if self.proj: data_symm[ii]["Proj"] = proj_sym
 
         return data_symm
             
@@ -234,26 +272,35 @@ class Predictor:
         #* C = (7s, 3p, 3d)
         #* N = (7s, 3p, 3d)
         #* O = (7s, 3p, 3d)
+        print("Separando los datos...", end = " ")
+        init = time.time()
         data_sep = []
 
         for mol in data:
             at_no = mol["Atomic_number"]
             Nucd  = mol["Nuc"]
             Pmat  = mol["Pmat_fit"]
-            Exc   = mol["Targets"]
+            if self.proj: Proj  = mol["Proj"]
+            KinE  = mol["Targets"]
             Pos   = mol["Positions"]
+            #TODO: Si no me equivoco, estas listas nunca se usan
             fH, fC, fN, fO = [], [], [], []
 
             # genero el array que tiene las gaussianas separados x atomos
             nat = len(at_no)
             ff, ffsor = [], []
+            if self.proj: ffp, ffpsor = [], []
             for ii in range(nat):
                 ff.append([])
                 ffsor.append([])
+                if self.proj:
+                    ffp.append([])
+                    ffpsor.append([])
 
             for jj in range(len(Pmat)):
                 at_idx = Nucd[jj] - 1
                 ff[at_idx].append(Pmat[jj])
+                if self.proj: ffp[at_idx].append(Proj[jj])
             
             # ff tiene dimensiones [nat][ngauss sime]
             # Ahora realizamos el sorting
@@ -263,15 +310,28 @@ class Predictor:
                 ii_s = sort_idx[ii]
                 for jj in range(len(ff[ii_s])):
                     ffsor[ii].append(ff[ii_s][jj])
+                    if self.proj: ffpsor[ii].append(ffp[ii_s][jj])
 
-            data_sep.append({
-                "T": Exc,
-                "fdens": ffsor,
-                "Pos": Pos,
-                "atn": at_no,
-                "how_many": mol["How_many"],
-            })
+            if self.proj:    
+                data_sep.append({
+                    "T": KinE,
+                    "fdens": ffsor,
+                    "Pos": Pos,
+                    "atn": at_no,
+                    "how_many": mol["How_many"],
+                    "proj": ffpsor,
+                })
+            else:
+                data_sep.append({
+                    "T": KinE,
+                    "fdens": ffsor,
+                    "Pos": Pos,
+                    "atn": at_no,
+                    "how_many": mol["How_many"],
+                })   
         
+        end = time.time()
+        print(str(np.round(end-init,2)) + " s.")
         return data_sep
 
     def _save_dataset(self,data):
@@ -288,6 +348,8 @@ class Predictor:
         print("Escritura",str(np.round(time.time()-init,2))+" s.")
 
     def _get_AEVs(self,data):
+        print("Calculando los AEV...", end = " ")
+        init = time.time()
         # Primero ponemos las posiciones en el orden
         # H, C, N, O
         # data_aev: contiene todo lo necesario para
@@ -303,6 +365,9 @@ class Predictor:
         # Generamos los fingerprints de cada atomo
         # en cada molecula
         data_aev = self._fingerprint(data_aev)
+
+        end = time.time()
+        print(str(np.round(end-init,2)) + " s.")
 
         return data_aev
 
@@ -596,12 +661,64 @@ class Predictor:
             # Generamos el fg pa cada atomo en la molecula
             for jj in range(nat):
                 ff = np.array(mol1["fdens"][jj])
-                fg_at = np.concatenate((mol2["AEV"][jj],ff))
+                if self.proj:
+                    ffp = np.array(mol1["proj"][jj])
+                    fg_at = np.concatenate((mol2["AEV"][jj], ff, ffp))
+                else:
+                    fg_at = np.concatenate((mol2["AEV"][jj],ff))
                 fg_mol.append(fg_at.tolist())
             ele["Fg"] = fg_mol
             data_new.append(ele)
 
         return data_new
+
+    def _format_data(self, data):
+        # Esta funcion deja el formato del Dataset igual que cuand se usan
+        # AEV, aunque los mismos estén desactivados.
+
+        data_sort = []
+        for mol in data:
+            # Listas
+            fg_mol = []
+            Target = mol["T"]
+            atno = mol["atn"]
+            Hw   = mol["how_many"]
+            fg_coeff = mol["fdens"]
+            if self.proj: fg_proj = mol["proj"]
+            nat  = len(atno)
+
+            # Primero se ordenan los números atómicos en el orden correcto
+
+            # Numpy arrays
+            np_atno = np.array(atno)
+            atno_s  = np.zeros((nat),dtype=np.int32)
+
+            # Sorting
+            sort_idx = np.argsort(np_atno)
+            for ii in range(nat):
+                idx = sort_idx[ii]
+                atno_s[ii] = np_atno[idx]
+
+            # Después se concatenan los descriptores si fuera necesario
+
+            if self.proj:
+                for jj in range(nat):
+                    fg_at = fg_coeff[jj] + fg_proj[jj]
+                    fg_mol.append(fg_at)
+            else:
+                fg_mol = fg_coeff
+
+            # Y se genera un diccionario del mismo tipo que al usar AEV
+
+            data_sort.append({
+                "T": Target,
+                "Atno": atno_s.tolist(),
+                "How_many": Hw,
+                "Fg": fg_mol,
+            })
+        
+        return data_sort 
+
         
 
 

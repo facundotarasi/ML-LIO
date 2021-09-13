@@ -19,7 +19,6 @@ if args.inputs == None:
     exit(-1)
 
 # Leemos el archivo de input
-#! Por el momento no usa los AEVs, solo P fit
 inputs_pred = mod.read_input(args.inputs)
 
 # Cargamos los datos y generamos el predictor
