@@ -129,6 +129,7 @@ class DataModule(pl.LightningDataModule):
         self.data_file = hooks["dataset_file"]        
         self.n_train_val = hooks["n_train_val"]
         self.test_size = hooks["test_size"]
+        self.test_samples = hooks["test_samples"]
         self.batch_size = hooks["batch_size"]
         self.path_dir = hooks["path_dir"]
         self.mode = hooks["mode"]
@@ -137,6 +138,9 @@ class DataModule(pl.LightningDataModule):
         self.coeff = hooks["coeff"]
         self.proj = hooks["proj"]
         self.AEV = hooks["AEV"]
+        if self.AEV:
+            self.nrad = hooks["nrad"]
+            self.nang = hooks["nang"]
 
         # Seteamos la seed
         random.seed(self.seed)
@@ -179,7 +183,7 @@ class DataModule(pl.LightningDataModule):
             # Obtenemos los factores de normalizacion
             self.factor_norm = self._get_norm(train_ds)
 
-            # Normalizamos los datos de trian y validation
+            # Normalizamos los datos de train y validation
             self.train_ds = self._normalize(train_ds,self.factor_norm)
             self.val_ds   = self._normalize(val_ds,self.factor_norm)
         
@@ -204,15 +208,15 @@ class DataModule(pl.LightningDataModule):
             
     def train_dataloader(self):
         return DataLoader(self.train_ds, batch_size=self.batch_size,
-                          shuffle=True, collate_fn=collate_fn, num_workers=6)
+                          shuffle=True, collate_fn=collate_fn, num_workers=4)
 
     def val_dataloader(self):
         return DataLoader(self.val_ds, batch_size=self.batch_size,
-                          shuffle=False, collate_fn=collate_fn, num_workers=6)
+                          shuffle=False, collate_fn=collate_fn, num_workers=4)
 
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
-                          shuffle=False, collate_fn=collate_fn, num_workers=6)
+                          shuffle=False, collate_fn=collate_fn, num_workers=4)
 
     def _load_data(self,name):
         print("Leyendo el DataSet...", end=" ")
@@ -237,12 +241,14 @@ class DataModule(pl.LightningDataModule):
         rand = list(range(self.ndata))
         random.shuffle(rand)
         nin = self.n_train_val
+        ntest = self.test_samples
 
         # Guardamos los indices de Test
         try:
+            rand.reverse()
             name = self.path_dir + "index_test.txt"
             with open(name, 'w') as file:
-                for ii in range(nin,len(rand)):
+                for ii in range(ntest):
                     file.write("%i\n" % rand[ii])
         except:
             print("No se pudo guardar los",end=" ")
@@ -251,6 +257,7 @@ class DataModule(pl.LightningDataModule):
         
         # Guardamos los indices de Train y Val
         try:
+            rand.reverse()
             name = self.path_dir + "index_train_val.txt"
             with open(name, 'w') as file:
                 for ii in range(0,nin):
@@ -297,26 +304,42 @@ class DataModule(pl.LightningDataModule):
             exit(-1)
 
         # Hidrogeno
-        if len(prop["H"]) != 0:
+        if len(prop["H"]) != 0 and self.coeff and not self.proj and not self.AEV:
             prop["H"] = torch.tensor(prop["H"]).view(-1,4)
+        elif len(prop["H"]) != 0 and self.coeff and self.proj and not self.AEV:
+            prop["H"] = torch.tensor(prop["H"]).view(-1,8)
+        elif len(prop["H"]) != 0 and self.coeff and self.proj and self.AEV:
+            prop["H"] = torch.tensor(prop["H"]).view(-1,8 + 4 * self.nrad + 10 * self.nang)
         else:
             prop["H"] = torch.tensor([0.])
 
         # Carbono
-        if len(prop["C"]) != 0:
+        if len(prop["C"]) != 0 and self.coeff and not self.proj and not self.AEV:
             prop["C"] = torch.tensor(prop["C"]).view(-1,13)
+        elif len(prop["C"]) != 0 and self.coeff and self.proj and not self.AEV:
+            prop["C"] = torch.tensor(prop["C"]).view(-1,26)
+        elif len(prop["C"]) != 0 and self.coeff and self.proj and self.AEV:
+            prop["C"] = torch.tensor(prop["C"]).view(-1,26 + 4 * self.nrad + 10 * self.nang)
         else:
             prop["C"] = torch.tensor([0.])
 
         # Nitrogeno
-        if len(prop["N"]) != 0:
+        if len(prop["N"]) != 0 and self.coeff and not self.proj and not self.AEV:
             prop["N"] = torch.tensor(prop["N"]).view(-1,13)
+        elif len(prop["N"]) != 0 and self.coeff and self.proj and not self.AEV:
+            prop["N"] = torch.tensor(prop["N"]).view(-1,26)
+        elif len(prop["N"]) != 0 and self.coeff and self.proj and self.AEV:
+            prop["N"] = torch.tensor(prop["N"]).view(-1,26 + 4 * self.nrad + 10 * self.nang)
         else:
             prop["N"] = torch.tensor([0.])
 
         # Oxigeno
-        if len(prop["O"]) != 0:
+        if len(prop["O"]) != 0 and self.coeff and not self.proj and not self.AEV:
             prop["O"] = torch.tensor(prop["O"]).view(-1,13)
+        elif len(prop["O"]) != 0 and self.coeff and self.proj and not self.AEV:
+            prop["O"] = torch.tensor(prop["O"]).view(-1,26)
+        elif len(prop["O"]) != 0 and self.coeff and self.proj and self.AEV:
+            prop["O"] = torch.tensor(prop["O"]).view(-1,26 + 4 * self.nrad + 10 * self.nang)
         else:
             prop["O"] = torch.tensor([0.])
 
@@ -377,6 +400,7 @@ class DataModule(pl.LightningDataModule):
                 else:
                     ff = torch.tensor([])
                 
+                ff = torch.nan_to_num(ff, nan = 0., posinf = 0., neginf = 0.)
                 mol_norm[key] = ff
             
             # Agrego How Many
@@ -469,17 +493,21 @@ class Atom_Model(pl.LightningModule):
         super(Atom_Model, self).__init__()
 
         # Arquitectura de la NN
-        self.fc1 = nn.Linear(nin,1000)
-        #self.fc2 = nn.Linear(128,128)
-        #self.fc3 = nn.Linear(128,64)
-        self.fc4 = nn.Linear(1000,1)
+        self.fc1 = nn.Linear(nin,1024)
+        #self.batchnorm1 = nn.BatchNorm1d(128)
+        self.fc2 = nn.Linear(1024,512)
+        #self.batchnorm2 = nn.BatchNorm1d(64)
+        #self.fc3 = nn.Linear(64,32)
+        self.fc4 = nn.Linear(512,1)
 
         self.act = nn.PReLU(num_parameters=1,init=0.25)
 
     def forward(self,x):
         if len(x) != 0:
             out = self.act(self.fc1(x))
-            #out = self.act(self.fc2(out))
+            #out = self.batchnorm1(out)
+            out = self.act(self.fc2(out))
+            #out = self.batchnorm2(out)
             #out = self.act(self.fc3(out))
             out = self.fc4(out)
         else:
@@ -496,11 +524,38 @@ class Modelo(pl.LightningModule):
         self.save_hyperparameters(config)
 
         # Atoms Model
-        self.Hydrogen  = Atom_Model(4)
-        self.Carbon    = Atom_Model(13)
-        self.Nitrogen  = Atom_Model(13)
-        self.Oxygen    = Atom_Model(13)
+        # Hidrogeno
+        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
+            self.Hydrogen  = Atom_Model(8)
+        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
+            self.Hydrogen  = Atom_Model(8 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
+        else:
+            self.Hydrogen  = Atom_Model(4)
+        
+        # Carbono
+        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
+            self.Carbon  = Atom_Model(26)
+        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
+            self.Carbon  = Atom_Model(26 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
+        else:
+            self.Carbon  = Atom_Model(13)
 
+        # Nitrogeno
+        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
+            self.Nitrogen  = Atom_Model(26)
+        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
+            self.Nitrogen  = Atom_Model(26 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
+        else:
+            self.Nitrogen  = Atom_Model(13)
+
+        # Oxigeno
+        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
+            self.Oxygen  = Atom_Model(26)
+        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
+            self.Oxygen  = Atom_Model(26 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
+        else:
+            self.Oxygen  = Atom_Model(13)
+        
         # Loss Function
         self.err = getattr(nn,self.hparams.Loss)()
 
@@ -609,7 +664,7 @@ class Modelo(pl.LightningModule):
                                    lr=self.hparams.lr,weight_decay=self.hparams.lr_decay)
         lr_scheduler = {
             "scheduler": ReduceLROnPlateau(optimizer=optim, mode="min",
-                         patience=3, factor=0.5, verbose=True),
+                         patience=5, factor=0.5, verbose=True),
             "reduce_on_plateau": True,
             "monitor": "val_loss",
         }

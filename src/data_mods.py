@@ -19,32 +19,57 @@ class Predictor:
     def __init__(self, inputs=None):
         self.path_P = inputs["path_P"]
         self.path_C = inputs["path_C"]
+        self.name_out = inputs["name_out"]
         self.save_pos = inputs["save_pos"]
         self.ndata = inputs["ndata"]
         self.path_results = inputs["path_results"]
+        self.comps = inputs["comps"]
         self.coeff = inputs["coeff"]
         self.proj = inputs["proj"]
         self.AEV = inputs["AEV"]
+        self.DSP = inputs["DSP"]
 
         # AEV variables
         if self.AEV:
-            self.cutoff_rad = inputs["cutoff_rad"]
-            self.cutoff_ang = inputs["cutoff_ang"]
-            self.nradial    = inputs["nradial"]
-            self.nangular   = inputs["nangular"]
-            self.radial_Rs  = inputs["radial_Rs"]
-            self.radial_etha= inputs["radial_etha"]
-            self.angular_Rs = inputs["angular_Rs"]
-            self.angular_etha=inputs["angular_etha"]
-            self.angular_tetha=inputs["angular_tetha"]
+            self.save_pos = True
+            try:
+                self.cutoff_rad = inputs["cutoff_rad"]
+                self.cutoff_ang = inputs["cutoff_ang"]
+                self.nradial    = inputs["nradial"]
+                self.nangular   = inputs["nangular"]
+                self.radial_Rs  = inputs["radial_Rs"]
+                self.radial_etha= inputs["radial_etha"]
+                self.angular_Rs = inputs["angular_Rs"]
+                self.angular_etha=inputs["angular_etha"]
+                self.angular_tetha=inputs["angular_tetha"]
+            except: 
+                print("Falta incluir algunas de las variables", end = " ")
+                print("para generar los AEV")
+                exit(-1)
+        
+        # DSP variables
+        if self.DSP:
+            self.save_pos = True
+            try:
+                self.rmin   = inputs["rmin"]
+                self.rmax   = inputs["rmax"]
+                self.nrad   = inputs["nrad"]
+                self.nphi   = inputs["nphi"]
+                self.ntheta = inputs["ntheta"]
+            except:
+                print("Falta incluir algunas de las variables", end = " ")
+                print("para generar los DSP")
+                exit(-1)
+
 
     def setup(self):
-        # Leemos Coordenadas, Pfit, Exc, Nuc, type, how_many
+        # Leemos Coordenadas, Pfit, KinE, Nuc, type, how_many
         data = self._read_files()
 
         # Con esto simetrizamos las funciones p y d
-        # de la densidad de fitting, por lo tanto la dimension se achica
-        data = self._symmetrize(data)
+        # de la densidad de fitting, por lo tanto la dimension se achica.
+        # Esto no debe usarse si se trabaja con los DSP
+        if self.coeff: data = self._symmetrize(data)
 
         # Separamos en tipo de atomos -> H, C, N, O
         # De esta data solo vamos a usar fdens, ya esta sorteada
@@ -61,47 +86,50 @@ class Predictor:
         # Para que conserve la misma forma
         if not self.AEV: data = self._format_data(data)
 
+        # Generamos los DSP
+        if self.DSP: data = self._density_spheres(data)
+
         # Guardamos el dataset
         self._save_dataset(data)
 
     def _read_files(self):
         """
-        Este archivo tiene que leer todo, Exc, Pfit, coord.
+        Este archivo tiene que leer todo, KinE, Pfit, coord.
         en que nucleo estan centradas las bases y de q tipo son (s,p,d)
         """
         data = []
         print("Leyendo los archivos...",end=" ")
         init = time.time()
 
-        for ii in range(self.ndata):
-            # Leo las coordenadas y el numero atomico
-            # IMPORTANTE: Por ahora, lo dejo sólo con etano para hacer pruebitas
-            file_name = self.path_C + "etano_" + str(ii+1) + ".xyz"
-            atomic_number, positions, how_many = self._read_xyz(file_name)
-
-            # Leo los descriptores elegidos
-            # IMPORTANTE: Por ahora, lo dejo sólo con etano para hacer pruebitas
-            file_name = self.path_P + "etano_" + str(ii+1) + ".dat"
-            KinE, Pmat_fit, gtype, Nuc, proj = self._read_rhoE(file_name)
-
-            # Guardo los datos en un solo diccionario
-            single_data = {
-                "targets": KinE,
-                "atomic_number": atomic_number,
-                "how_many": how_many,
-                "Pmat_fit": Pmat_fit,
-                "gtype": gtype, 
-                "Nuc": Nuc,
-            }
-
-            if len(positions) != 0:
-                single_data["positions"] = positions
-
-            if self.proj:
-                single_data["proj"] = proj
+        for key in self.comps:
+            for ii in range(self.ndata):
             
-            # Guardo los datos de una molecula
-            data.append(single_data)
+                # Leo las coordenadas y el numero atomico
+                file_name = self.path_C + key + "_" + str(ii+1) + ".xyz"
+                atomic_number, positions, how_many = self._read_xyz(file_name)
+
+                # Leo los descriptores elegidos
+                file_name = self.path_P + key + "_" + str(ii+1) + ".dat"
+                KinE, Pmat_fit, gtype, Nuc, proj = self._read_rhoE(file_name)
+
+                # Guardo los datos en un solo diccionario
+                single_data = {
+                    "Targets": KinE,
+                    "Atomic_number": atomic_number,
+                    "How_many": how_many,
+                    "Pmat_fit": Pmat_fit,
+                    "gtype": gtype, 
+                    "Nuc": Nuc,
+                }
+
+                if len(positions) != 0:
+                    single_data["Positions"] = positions
+
+                if self.proj:
+                    single_data["proj"] = proj
+                
+                # Guardo los datos de una molecula
+                data.append(single_data)
         
         fin = time.time()
         print(str(np.round(fin-init,2))+" s.")
@@ -207,7 +235,7 @@ class Predictor:
             np   = data[ii]["gtype"][1]
             nd   = data[ii]["gtype"][2]
 
-            KinE  = data[ii]["targets"]
+            KinE  = data[ii]["Targets"]
             Pmat = data[ii]["Pmat_fit"]
             if self.proj: 
                 proj = data[ii]["proj"]
@@ -257,9 +285,9 @@ class Predictor:
                 "Targets": KinE,
                 "Pmat_fit": Pmat_sym,
                 "Nuc": Nuc_sym,
-                "Atomic_number": data[ii]["atomic_number"],
-                "Positions": data[ii]["positions"],
-                "How_many": data[ii]["how_many"],
+                "Atomic_number": data[ii]["Atomic_number"],
+                "Positions": data[ii]["Positions"],
+                "How_many": data[ii]["How_many"],
             })
 
             if self.proj: data_symm[ii]["Proj"] = proj_sym
@@ -318,7 +346,7 @@ class Predictor:
                     "fdens": ffsor,
                     "Pos": Pos,
                     "atn": at_no,
-                    "how_many": mol["How_many"],
+                    "How_many": mol["How_many"],
                     "proj": ffpsor,
                 })
             else:
@@ -327,7 +355,7 @@ class Predictor:
                     "fdens": ffsor,
                     "Pos": Pos,
                     "atn": at_no,
-                    "how_many": mol["How_many"],
+                    "How_many": mol["How_many"],
                 })   
         
         end = time.time()
@@ -336,7 +364,7 @@ class Predictor:
 
     def _save_dataset(self,data):
         init = time.time()
-        path = self.path_results + "dataset_Pfit.pickle"
+        path = self.path_results + self.name_out
         try:
             with open(path,"wb") as f:
                 pickle.dump(data,
@@ -377,7 +405,7 @@ class Predictor:
             # Listas
             atno = mol["atn"]
             pos  = mol["Pos"]
-            Hw   = mol["how_many"]
+            Hw   = mol["How_many"]
             nat  = len(atno)
 
             # Numpy arrays
@@ -459,7 +487,6 @@ class Predictor:
         return fc_rad, fc_ang
 
     def _fingerprint(self,data):
-        #TODO: CHECKEAR LA CUENTA X FAVOR DE LOS FG
         # Checkeamos dimensiones de gaussianas
         nang = len(self.angular_Rs)*len(self.angular_tetha)
         if self.nradial != len(self.radial_Rs):
@@ -655,6 +682,7 @@ class Predictor:
             fg_mol = []
             ele = {}
             ele["T"] = mol1["T"]
+            ele["Pos"] = mol1["Pos"]
             ele["Atno"] = mol2["Atno"].tolist()
             ele["How_many"] = mol2["How_many"]
             nat = len(mol2["Atno"])
@@ -673,7 +701,7 @@ class Predictor:
         return data_new
 
     def _format_data(self, data):
-        # Esta funcion deja el formato del Dataset igual que cuand se usan
+        # Esta funcion deja el formato del Dataset igual que cuando se usan
         # AEV, aunque los mismos estén desactivados.
 
         data_sort = []
@@ -682,7 +710,8 @@ class Predictor:
             fg_mol = []
             Target = mol["T"]
             atno = mol["atn"]
-            Hw   = mol["how_many"]
+            Hw   = mol["How_many"]
+            Pos = mol["Pos"]
             fg_coeff = mol["fdens"]
             if self.proj: fg_proj = mol["proj"]
             nat  = len(atno)
@@ -692,12 +721,15 @@ class Predictor:
             # Numpy arrays
             np_atno = np.array(atno)
             atno_s  = np.zeros((nat),dtype=np.int32)
+            np_pos  = np.array(Pos)
+            pos_s = np.zeros((nat, 3))
 
             # Sorting
             sort_idx = np.argsort(np_atno)
             for ii in range(nat):
                 idx = sort_idx[ii]
                 atno_s[ii] = np_atno[idx]
+                pos_s[ii,:] = np_pos[idx,:]
 
             # Después se concatenan los descriptores si fuera necesario
 
@@ -714,21 +746,303 @@ class Predictor:
                 "T": Target,
                 "Atno": atno_s.tolist(),
                 "How_many": Hw,
+                "Pos": pos_s.tolist(), 
                 "Fg": fg_mol,
             })
-        
+            
         return data_sort 
 
+    def _density_spheres(self, data):
         
+        """
+        Este método se usa para generar descriptores basados en la densidad
+        electrónica en puntos seleccionados de la molécula, tomando como
+        referencia su centro de masa.
+        """
 
+        # Primero leemos los coeficientes y exponentes asociados a las
+        # funciones base de la base auxiliar.
+        basis_data = self._get_coeff()
 
+        # Calculamos el centro de masas de cada molécula
+        data = self._get_mass_center(data)
 
+        # Generamos para cada átomo un array con los puntos sobre los que
+        # se quiere calcular la densidad electrónica
+        data = self._dens_points(data)
 
+        # Se computa la densidad electrónica en cada uno de los puntos
+        # seleccionados
+        data = self._eval_dens(data, basis_data)
 
+        return data 
 
+    def _get_coeff(self):
+        init = time.time()
+        print("Leyendo los coeficientes de la base...", end = " ")
+        with open("DZVP", "r") as file:
+            basis_data = {}
+            for key in ["H", "C", "N", "O"]:
+                basis_data[key] = {}
+                basis_data[key]["exp"] = []
+                basis_data[key]["coeff"] = []
+            
+            # Leemos el archivo que contiene los coeficientes y exponentes
+            # asociados a las funciones de la base auxiliar para cada átomo
+            
+            # H
+            for ii in range(5):
+                line = file.readline()
+                field = line.split()
+                try:
+                    basis_data["H"]["exp"].append(float(field[0]))
+                    basis_data["H"]["coeff"].append(float(field[1]))
+                except:
+                    continue
+            
+            # C, N, O
+            for key in ["C", "N", "O"]:
+                for ii in range(35):
+                    line = file.readline()
+                    field = line.split()
+                    try:
+                        basis_data[key]["exp"].append(float(field[0]))
+                        basis_data[key]["coeff"].append(float(field[1]))
+                    except:
+                        continue
+        end = time.time()
+        print(str( np.round(end - init,2)) + " s.")
+        return basis_data 
 
+    def _get_mass_center(self, data):
+        init = time.time()
+        print("Calculando los centros de masas...", end = " ")
+        for mol in data:
 
+            # Para cada molécula del DataSet calculamos el centro de masas
+            atnum = mol["Atno"]
+            pos = mol["Pos"]
+            NN = len(atnum)
+            acum = 0.
+            MM = 0.
+            for ii in range(NN):
+                # Acumulamos el producto de la masa atómica por el vector posición
+                # Y sumamos las masas atómicas para obtener la masa molecular
+                pos_arr = np.array(pos[ii])
+                if int(atnum[ii]) == 1:
+                    acum = acum + 1.008 * pos_arr
+                    MM = MM + 1.008
+                if int(atnum[ii]) == 6:
+                    acum = acum + 12.01 * pos_arr 
+                    MM = MM + 12.01
+                if int(atnum[ii]) == 7:
+                    acum = acum + 14.01 * pos_arr 
+                    MM = MM + 14.01
+                if int(atnum[ii]) == 8:
+                    acum = acum + 16.00 * pos_arr 
+                    MM = MM + 16.00
+            
+            com = acum / MM # Centro de masas
+            mol["COM"] = com.tolist()
+        end = time.time()
+        print(str(np.round(end - init, 2)) + " s.")
+        return data 
 
+    def _dens_points(self, data):
+        init = time.time()
+        print("Calculando los puntos seleccionados...", end = " ")
+        for mol in data:
+            mol["vector"] = []
 
+            # Para cada átomo, calculamos el vector unitario con origen 
+            # en el núcleo y extremo en el centro de masas
+            NN = len(mol["Atno"])
+            for ii in range(NN):
+                vec = np.array(mol["COM"]) - np.array(mol["Pos"][ii])
+                vec2 = vec**2
+                norm = np.sqrt(vec2.sum())
+                if norm == 0.: print("Cuidado: Se halló un vector al COM nulo")
+                vec = vec/norm 
+                mol["vector"].append(vec)
+            
+            # Ahora generamos listas con los parámetros necesarios para
+            # obtener los puntos seleccionados
+            # Esta lista tiene radios equiespaciados que se miden a partir
+            # de los núcleos
+            rmin = self.rmin
+            rmax = self.rmax 
+            nrad = self.nrad
+            if rmin == 0:
+                radius = [rmin + (rmax - rmin)*(i+1)/(nrad - 1) for i in range (nrad - 1)]
+            else:
+                radius = [rmin + (rmax - rmin)*i/(nrad - 1) for i in range(nrad - 1)]
+                radius.append(rmax)
 
+            # Lo mismo para los ángulos que se quieran barrer
+            nphi = self.nphi 
+            ntheta = self.ntheta
+            phi = [2 * np.pi*i/nphi for i in range(nphi)]
+            theta = [np.pi*i/(ntheta - 1) for i in range(ntheta - 1)]
+            theta.append(np.pi)
 
+            mol["D_Points"] = []
+            # Ahora se generan los puntos (x, y, z) para cada átomo en cada
+            # molécula del DataSet 
+            for ii in range(NN):
+                mol["D_Points"].append([])
+                center = np.array(mol["Pos"][ii])
+                vector = mol["vector"][ii]
+                if rmin == 0:
+                    mol["D_Points"][ii].append(center)
+                for rr in radius:
+                    for pp in phi:
+                        for tt in theta:
+                            point = np.zeros((3))
+                            # Calculo phi y theta del vector unitario que apunta al centro de
+                            # masas
+                            thetacom = np.arccos(vector[2])
+                            if vector[0] > 0.:
+                                phicom = np.arctan(vector[1] / vector[0])
+                            elif vector[0] < 0:
+                                phicom = np.arctan(vector[1] / vector[0]) + np.pi
+                            elif vector[0] == 0 and vector[1] > 0:
+                                phicom = np.pi / 2
+                            elif vector[0] == 0 and vector[1] < 0:
+                                phicom = 3 * np.pi /2
+                            elif vector[0] == 0 and vector[1] == 0:
+                                phicom = 0.
+                            
+                            point[0] = center[0] + rr * np.cos(phicom + pp) * np.sin(thetacom + tt)
+                            point[1] = center[1] + rr * np.sin(phicom + pp) * np.sin(thetacom + tt)
+                            point[2] = center[2] + rr * np.cos(thetacom + tt)
+                            mol["D_Points"][ii].append(point)
+            del mol["vector"]
+            del mol["COM"]
+                            
+        end = time.time()
+        print(str(np.round(end - init, 2)) + " s.")
+        return data 
+
+    def _eval_dens(self, data, basis_data):
+        init = time.time()
+        print("Evaluando la densidad electrónica...", end = " ")
+        """
+        Este método computa la densidad electrónica de una molécula a partir de
+        los coeficientes de las funciones de la base auxiliar
+        """
+        rmin = self.rmin 
+        nrad = self.nrad 
+        nphi = self.nphi 
+        ntheta = self.ntheta 
+        if rmin == 0.:
+            ndpoints = (nrad - 1) * nphi * ntheta + 1
+        else:
+            ndpoints = nrad * nphi * ntheta 
+        
+        data_fin = []
+        for mol in data:
+            NN = len(mol["Atno"])
+            mol["Dens"] = []
+            for ii in range(NN):
+                mol["Dens"].append([])
+                for jj in range(ndpoints):
+                    point = mol["D_Points"][ii][jj]
+                    dens = 0.
+
+                    # Se suman las contribuciones a la densidad de cada átomo
+                    for kk in range(NN):
+                        posit = np.array(mol["Pos"][kk])
+                        if mol["Atno"][kk] == 1:
+                            for ll in range(4):
+                                dens = dens + mol["Fg"][kk][ll] * basis_function(int(ll), mol["Atno"][kk], point, posit, basis_data)
+                        else:
+                            for ll in range(34):
+                                dens = dens + mol["Fg"][kk][ll] * basis_function(int(ll), mol["Atno"][kk], point, posit, basis_data)
+                    
+                    # Se agrega la densidad electrónica calculada a la lista para el átomo
+                    # en cuestión
+                    mol["Dens"][ii].append(dens)
+
+            data_fin.append({
+                "T": mol["T"],
+                "Atno": mol["Atno"],
+                "How_many": mol["How_many"],
+                "Pos": mol["Pos"],
+                "Fg": mol["Dens"],
+            })
+        end = time.time()
+        print(str(np.round(end - init, 2)) + " s.")
+        return data_fin 
+
+def basis_function(type, elem, XYZ, X0Y0Z0, basis_data):
+    
+    if elem == 1:
+        key = "H"
+    elif elem == 6:
+        key = "C"
+    elif elem == 7:
+        key = "N"
+    elif elem == 8:
+        key = "O"
+
+    vdist2 = (XYZ - X0Y0Z0)**2
+    dist2 = vdist2.sum()
+    
+    if 0 <= type <= 6:
+        # Función base tipo s
+        func = basis_data[key]["coeff"][type] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        return func
+    elif type == 7 or type == 10 or type == 13:
+        # Función base tipo px
+        diff = XYZ - X0Y0Z0
+        func = diff[0] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 8 or type == 11 or type == 14:
+        # Función base tipo py
+        diff = XYZ - X0Y0Z0
+        func = diff[1] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 9 or type == 12 or type == 15:
+        # Función base tipo pz
+        diff = XYZ - X0Y0Z0
+        func = diff[2] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 16 or type == 22 or type == 28:
+        # Función base tipo dxx
+        diff = XYZ - X0Y0Z0
+        func = diff[0] * diff[0] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 17 or type == 23 or type == 29:
+        # Función base tipo dyx
+        diff = XYZ - X0Y0Z0
+        func = diff[1] * diff[0] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 18 or type == 24 or type == 30:
+        # Función base tipo yy
+        diff = XYZ - X0Y0Z0
+        func = diff[1] * diff[1] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 19 or type == 25 or type == 31:
+        # Función base tipo zx
+        diff = XYZ - X0Y0Z0
+        func = diff[2] * diff[0] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 20 or type == 26 or type == 32:
+        # Función base tipo zy
+        diff = XYZ - X0Y0Z0
+        func = diff[2] * diff[1] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 
+    elif type == 21 or type == 27 or type == 33:
+        # Función base tipo zz
+        diff = XYZ - X0Y0Z0
+        func = diff[2] * diff[2] * np.exp(- basis_data[key]["exp"][type] * dist2)
+        func = basis_data[key]["coeff"][type] * func 
+        return func 

@@ -21,6 +21,9 @@ if args.inputs == None:
 # Leemos el archivo de input
 inputs = mod.read_input(args.inputs)
 
+# Seteamos la misma seed para todo
+pl.seed_everything(inputs["seed"], workers=True)
+
 # Nombre del archivo de datos
 inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
 
@@ -48,11 +51,11 @@ else:
     model = mod.Modelo(inputs)
 
 # Abrimos un folder para los resultados
-if os.path.isdir(inputs["path_results"]):
+if os.path.isdir(inputs["path_results"]) and not inputs["restart"]:
     os.system("rm -rf " + inputs["path_results"])
 
 # Checkpoint del Modelo
-checkpoint = ModelCheckpoint(
+if not inputs["restart"]: checkpoint = ModelCheckpoint(
     dirpath = inputs["path_results"],
     monitor="val_loss",
     filename = "modelo-{val_loss:.5f}",
@@ -63,9 +66,10 @@ checkpoint = ModelCheckpoint(
 # Early stopping
 early_stopping = EarlyStopping(
     monitor = "val_loss",
-    patience= 10,
+    patience= 20,
     verbose=True,
-    mode="min"
+    mode="min",
+    min_delta = 0.000001
 )
 
 # Lr Monitor
@@ -73,7 +77,11 @@ lr_monitor = LearningRateMonitor(logging_interval="epoch")
 
 # Entrenamiento
 calls = [checkpoint,early_stopping,lr_monitor]
-trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=0,callbacks=calls)
+if inputs["restart"]:
+    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=0,callbacks=calls, resume_from_checkpoint = 
+    inputs["path_results"] + inputs["model_file"])
+else:
+    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=0,callbacks=calls)
 trainer.fit(model=model,datamodule=Data)
 
 # Graficamos resultados del train

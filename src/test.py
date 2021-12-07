@@ -20,6 +20,9 @@ if args.inputs == None:
 # Leemos el archivo de input
 inputs = mod.read_input(args.inputs)
 
+# Seteamos la misma seed para todo
+pl.seed_everything(inputs["seed"], workers=True)
+
 # Nombre del archivo de datos
 inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
 
