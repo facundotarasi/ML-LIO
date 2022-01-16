@@ -10,10 +10,10 @@ import argparse
 
 # Argumentos
 parser = argparse.ArgumentParser()
-parser.add_argument("-i","--inputs", help="Input file path", action="store")
+parser.add_argument("-i","--inputs", help = "Input file path", action = "store")
 args = parser.parse_args()
 
-# Checkeamos la correcta ejecucion del programa
+# Chequeamos la correcta ejecucion del programa
 if args.inputs == None:
     print("Ejecuta el codigo: ./train.py -i path_to_input")
     exit(-1)
@@ -24,28 +24,22 @@ inputs = mod.read_input(args.inputs)
 # Seteamos la misma seed para todo
 pl.seed_everything(inputs["seed"], workers=True)
 
-# Nombre del archivo de datos
-inputs["dataset_file"] = inputs["path_dir"] + "dataset_Pfit.pickle"
-
 # Resultados
 inputs["path_results"] = inputs["path_dir"] + "results/"
 
 Data = mod.DataModule(inputs)
-Data.setup(stage="fit")
-
-# Guardamos la cantidad de data total: train + val + test
-inputs["ndata"] = Data.ndata
+Data.setup(stage = "fit")
 
 # Instanciamos el Modelo
 if inputs["restart"]:
-    print("Restarting trainning...")
-    path = inputs["path_results"] + "/" 
+    print("Reiniciando entrenamiento...")
+    path = inputs["path_results"]
     path = path + inputs["model_file"]
     try:
         model = mod.Modelo.load_from_checkpoint(
                 checkpoint_path=path,config=inputs)
     except:
-        print("El modelo no se pudo Leer")
+        print("El modelo no se pudo leer")
         exit(-1)
 else:
     model = mod.Modelo(inputs)
@@ -78,11 +72,11 @@ lr_monitor = LearningRateMonitor(logging_interval="epoch")
 # Entrenamiento
 calls = [checkpoint,early_stopping,lr_monitor]
 if inputs["restart"]:
-    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=0,callbacks=calls, resume_from_checkpoint = 
+    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=inputs["gpu"],callbacks=calls, resume_from_checkpoint = 
     inputs["path_results"] + inputs["model_file"])
 else:
-    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=0,callbacks=calls)
+    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=inputs["gpu"],callbacks=calls)
 trainer.fit(model=model,datamodule=Data)
 
 # Graficamos resultados del train
-model.graficar()
+model.graph_train()

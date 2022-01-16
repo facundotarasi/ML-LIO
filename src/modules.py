@@ -1,17 +1,15 @@
 
 """
-Este module sirve para entrenar diferentes moleculas, usando 
-la densidad de fitting
+Este modulo sirve para entrenar diferentes moleculas, usando 
+la densidad electronica y sus gradientes
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 import pickle
-import random
 import torch
 import pytorch_lightning as pl
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -30,8 +28,9 @@ def read_input(files):
 
 # Generamos el DataSet: 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self,data):
+    def __init__(self,data, grid_size):
         self.my_data = data
+        self.grid_size = grid_size 
     
     def __len__(self):
         return len(self.my_data)
@@ -41,144 +40,108 @@ class Dataset(torch.utils.data.Dataset):
         how_many = mol["How_many"]
         atomic = mol["Atno"]
         sample = {}
-        fH, fC, fN, fO = [], [], [], [] 
+        size = self.grid_size
+        fH, fC = torch.rand(0,4, size, size, size), torch.rand(0, 4, size, size, size)
+        fN, fO = torch.rand(0,4, size, size, size), torch.rand(0, 4, size, size, size)
 
         # Real Truth
-        sample["T"] = torch.tensor(mol["T"])
+        sample["T"] = mol["T"]
 
-        for jj in range(len(atomic)):
-            if atomic[jj] == 1:
-                fH.append(mol["Fg"][jj])
-            elif atomic[jj] == 6:
-                fC.append(mol["Fg"][jj])
-            elif atomic[jj] == 7:
-                fN.append(mol["Fg"][jj])
-            elif atomic[jj] == 8:
-                fO.append(mol["Fg"][jj])
+        for jj in range(atomic.shape[0]):
+            if int(atomic[jj].item()) == 1:
+                stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
+                fH = torch.cat((fH, torch.unsqueeze(stack, 0)))
+            elif int(atomic[jj].item()) == 6:
+                stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
+                fC = torch.cat((fC, torch.unsqueeze(stack, 0)))
+            elif int(atomic[jj].item()) == 7:
+                stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
+                fN = torch.cat((fN, torch.unsqueeze(stack, 0)))
+            elif int(atomic[jj].item()) == 8:
+                stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
+                fO = torch.cat((fO, torch.unsqueeze(stack, 0)))
             else:
-                print("Sólo se permiten los elmentos CHON")
+                print("Sólo se permiten los elmentos C, H, O, N")
                 exit(-1)
         
         # Hidrogeno
-        sample["H"] = torch.tensor(fH)
+        sample["H"] = fH
         
         # Carbono
-        sample["C"] = torch.tensor(fC)
+        sample["C"] = fC
 
         # Nitrogeno
-        sample["N"] = torch.tensor(fN)
+        sample["N"] = fN 
 
         # Oxigeno
-        sample["O"] = torch.tensor(fO)
+        sample["O"] = fO 
 
         # TODO How Many: Por el momento lo guardo despues veo
         # TODO: si es necesario o no
-        sample["how_many"] = torch.tensor(how_many)
+        sample["how_many"] = how_many
 
         return sample
-    
-    """
-    # Esta función no aplica para la forma actual del Dataset.
-    # De todas formas no estoy seguro de si mi propuesta es la más eficiente
-    # (Probablemente no)
-    def get_list(self,nn,ll):
-        if nn != 0:
-            f = torch.tensor(ll).view(nn,-1)
-        else:
-            f = torch.tensor([])
-        return f
-    """
 
 def collate_fn(batch):
     tmp = {
-        "T": [],
-        "H": [],
-        "C": [],
-        "N": [],
-        "O": [],
-        "how_many": [],
+        "T": torch.rand(0, 1),
+        "H": torch.rand(0, 4, 7, 7, 7),
+        "C": torch.rand(0, 4, 7, 7, 7),
+        "N": torch.rand(0, 4, 7, 7, 7),
+        "O": torch.rand(0, 4, 7, 7, 7),
+        "how_many": torch.rand(0, 4),
     }
     for mol in batch:
-        tmp["T"].append(mol["T"])
-        tmp["how_many"].append(mol["how_many"])
+        tmp["T"] = torch.cat((tmp["T"], mol["T"].unsqueeze(0)))
+        tmp["how_many"] = torch.cat((tmp["how_many"], mol["how_many"].unsqueeze(0)))
 
         for key in ["H","C","N","O"]:
-            prop = mol[key]
-            if len(prop) != 0:
-                nat = prop.shape[0]
-                for ii in range(nat):
-                    tmp[key].append(prop[ii,:])
-
-    # En caso de q en el batch ninguna molecula tenga algun atomo
-    for key in tmp:
-        if len(tmp[key]) != 0:
-            tmp[key] = torch.stack(tmp[key],dim=0)
-        else:
-            tmp[key] = torch.tensor([])
+            tmp[key] = torch.cat((tmp[key], mol[key]))
 
     return tmp
 
 # Definicion del DataModule
 class DataModule(pl.LightningDataModule):
-    # Main Methods
     def __init__(self, hooks):
         super().__init__()
-        print("Init DataModule")
+        print("Inicializando DataModule")
 
         self.seed = hooks["seed"]
-        self.data_file = hooks["dataset_file"]        
-        self.n_train_val = hooks["n_train_val"]
-        self.test_size = hooks["test_size"]
-        self.test_samples = hooks["test_samples"]
-        self.batch_size = hooks["batch_size"]
         self.path_dir = hooks["path_dir"]
-        self.mode = hooks["mode"]
-        self.val_options = hooks["val_options"]
-        self.val_path = hooks["val_path"]
-        self.coeff = hooks["coeff"]
-        self.proj = hooks["proj"]
-        self.AEV = hooks["AEV"]
-        if self.AEV:
-            self.nrad = hooks["nrad"]
-            self.nang = hooks["nang"]
+        self.batch_size = hooks["batch_size"]
+        self.indexes = hooks["indexes"]
+        self.grid_size = hooks["grid_size"]
+        self.transform = hooks["transform"]
 
         # Seteamos la seed
-        random.seed(self.seed)
         if self.seed != None:
             torch.manual_seed(self.seed)
 
     def setup(self, stage = None):
-        print("Setup stage:", stage)
 
-        # Leemos los datos en el dataset
-        data = self._load_data(self.data_file)
-
-        # Checkeamos dimensiones
-        self.ndata = len(data)
-        if (self.ndata < self.n_train_val):
-            print("La cantidad de datos para train",end=" ")
-            print("es mayor a la del dataset")
-            exit(-1)
-
+        # Si estamos durante entrenamiento, cargamos los datos de los
+        # DataSets de entrenamiento y validacion
         if stage == "fit":
-            # Generamos una array con numeros random
-            rand_number = self._get_random()
 
-            # Separamos los datos para train_val
-            data = self._separate_data(data,rand_number)
+            print("Preparando para el entrenamiento...")
 
-            # Generamos el dataset para toda la muestra de train_val
-            data_ds = Dataset(data)
+            # Cargamos los datos de training y validation
+            train_data = self._load_data("Training")
+            val_data = self._load_data("Validacion")
 
-            # Spliteamos la data en train y val
-            train_ds, val_ds = train_test_split(data_ds, 
-                       test_size=self.test_size, shuffle=True, random_state=42)
-            
-            if self.val_options == "out":
-                print("Validation out of Data Train")
-                nval = len(val_ds)
-                val = self._validation_out(nval)
-                val_ds = Dataset(val)
+            # Generamos los DataSets de training y validation
+            init = time.time()
+            print("Generando los DataSets...", end = " ")
+
+            train_ds = Dataset(train_data, self.grid_size)
+            val_ds   = Dataset(val_data, self.grid_size)
+
+            print(str(np.round(time.time() - init, 2)) + " s.")
+
+            # Realizamos las transformaciones si es necesario
+            if self.transform:
+                train_ds = self._transform(train_ds)
+                val_ds = self._transform(val_ds)
 
             # Obtenemos los factores de normalizacion
             self.factor_norm = self._get_norm(train_ds)
@@ -188,20 +151,24 @@ class DataModule(pl.LightningDataModule):
             self.val_ds   = self._normalize(val_ds,self.factor_norm)
         
         elif stage == "test":
-            if self.mode == "test":
-                # Leo los indices empleados en test
-                rand_ind = self._read_indices( )
 
-                # Cargo los datos de test
-                data = self._separate_data(data,rand_ind)
-            else:
-                print("Mode in: " + self.mode)
+            # Cargamos los datos de test
+            test_data = self._load_data("Test")
 
-            # Generamos el dataset para toda la muestra de train_val
-            test_ds = Dataset(data)
+            # Generamos el dataset para toda los datos de test
+            init = time.time()
+            print("Generando el DataSet...", end = " ")
+
+            test_ds = Dataset(test_data, self.grid_size)
+
+            print(str(np.round(time.time() - init, 2)) + " s.")
+
+            # Realizamos las transformaciones si es necesario
+            if self.transform:
+                test_ds = self._transform(test_ds)
 
             # Leemos los factores de normalizacion
-            self.factor_norm = self._read_norm( )
+            self.factor_norm = self._read_norm()
 
             # Normalizamos
             self.test_ds = self._normalize(test_ds,self.factor_norm)
@@ -218,187 +185,158 @@ class DataModule(pl.LightningDataModule):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
                           shuffle=False, collate_fn=collate_fn, num_workers=4)
 
-    def _load_data(self,name):
-        print("Leyendo el DataSet...", end=" ")
+    def _load_data(self, currstat):
         init = time.time()
-        try:
-            with open(name,"rb") as f:
-                data = pickle.load(f)
-        except:
-            print("No se pudo leer el", end=" ")
-            print("archivo", name)
-            exit(-1)
-        fin = time.time()
-        print(str(np.round(fin-init,2))+" s.")
-        
-        return data
+        print("Leyendo los archivos de " + currstat + "...", end = " ")
+        # Inicializamo una lista para los datos
+        list_data = []
+        for jj in self.indexes:
+            first_ind = int(jj.split()[0])
+            last_ind = int(jj.split()[1])
 
-    def _get_random(self):
-        # Este metodo regresa una lista
-        # con numeros enteros entre 0 y ndata
-        # en una lista
-        random.seed(self.seed)
-        rand = list(range(self.ndata))
-        random.shuffle(rand)
-        nin = self.n_train_val
-        ntest = self.test_samples
+            # Abrimos cada archivo, y cargamos sus datos en las listas
+            path = self.path_dir 
+            if currstat == "Training":
+                namef = "train_data_"
+            elif currstat == "Validacion":
+                namef = "val_data_"
+            elif currstat == "Test":
+                namef = "test_data_"
 
-        # Guardamos los indices de Test
-        try:
-            rand.reverse()
-            name = self.path_dir + "index_test.txt"
-            with open(name, 'w') as file:
-                for ii in range(ntest):
-                    file.write("%i\n" % rand[ii])
-        except:
-            print("No se pudo guardar los",end=" ")
-            print("indices del test")
-            exit(-1)
-        
-        # Guardamos los indices de Train y Val
-        try:
-            rand.reverse()
-            name = self.path_dir + "index_train_val.txt"
-            with open(name, 'w') as file:
-                for ii in range(0,nin):
-                    file.write("%i\n" % rand[ii])
-        except:
-            print("No se pudo guardar los",end=" ")
-            print("indices del train_val")
-            exit(-1)
-        
-        return rand[0:nin]
+            with open(path + namef + str(first_ind) + "_to_" + \
+                str(last_ind) + ".pickle", "rb") as ff:
+                data_temp = pickle.load(ff)
+            list_data += data_temp 
+            del data_temp 
 
-    def _separate_data(self,data,rand):
-        ntot = len(rand)
-        data_cut = []
-        for ii in range(ntot):
-            idx = rand[ii]
-            data_cut.append(data[idx])
-        
-        return data_cut
+        print(str(np.round(time.time() - init, 2)) + " s.")
+        return list_data 
 
+    def _transform(self, data):
+        init = time.time()
+        print("Transformando las variables de input...", end = " ")
+        data_trans = []
+        const = 2 * (3 * (np.pi)**2 )**(1/3)
+
+        for mol in data:
+            mol_trans = {}
+
+            # Ni el Target ni how_many se transforman, por lo que se igualan
+            # a los datos originales.
+            mol_trans["T"] = mol["T"]
+            mol_trans["how_many"] = mol["how_many"] 
+
+            # Primero transformamos el gradiente de la densidad en el gradiente
+            # reducido (s)
+            # s = |\nabla \rho| / [ 2 * (3 * \pi^2)^{1/3} \rho^{4/3} ]
+            for key in ["H", "C", "N", "O"]:
+                rho_43 = (mol[key][:, 0, :, :, :])**(4/3)
+                rho_43 = torch.stack((rho_43, rho_43, rho_43), dim = 1)
+                s = torch.abs(mol[key][:, 1:, :, :, :]) / const 
+                s = s / rho_43 
+
+                # Ahora transformamos la densidad
+                # rhot = rho^{1/3}
+                rho_13 = (mol[key][:, 0, :, :, :])**(1/3)
+
+                # Y juntamos todo en un tensor
+                mol_trans[key] = torch.cat((rho_13.unsqueeze(1), s), 1)
+
+                # Tomamos logaritmo decimal
+                mol_trans[key] = torch.log10(mol_trans[key]) 
+
+                # Eliminamos valores 'nan'
+                mol_trans[key] = torch.nan_to_num(mol_trans[key], nan = 0., posinf = 0., neginf = 0.)
+
+            data_trans.append(mol_trans)
+
+        print(str(np.round(time.time() - init, 2)) + " s.")
+        return data_trans
+    
     def _get_norm(self,data):
-        prop = {
-            "T": [],
-            "H": [],
-            "C": [],
-            "N": [],
-            "O": [],
+        init = time.time()
+        print("Calculando los factores de normalizacion...", end = " ")
+        size = self.grid_size 
+        fact = {
+            "T": {},
+            "H": {},
+            "C": {},
+            "N": {},
+            "O": {},
         }
+
+        acum = {
+            "T": torch.rand(0, 1),
+            "H": torch.rand(0, 4, size, size, size),
+            "C": torch.rand(0, 4, size, size, size), 
+            "N": torch.rand(0, 4, size, size, size),
+            "O": torch.rand(0, 4, size, size, size),
+        }
+
         for mol in data:
             for key in mol:
-                if key == "T": 
-                    prop[key].append(mol[key].item())
+                if key == "T":
+                    acum[key] = torch.cat((acum[key], torch.unsqueeze(mol[key], 0)))
                 elif key != "how_many":
-                    for ii in range(mol[key].shape[0]):
-                        ff = mol[key][ii].tolist()
-                        for jj in range(len(ff)):
-                            prop[key].append(ff[jj])
-        
-        # Target
-        if len(prop["T"]) != 0:
-            prop["T"] = torch.tensor(prop["T"])
-        else:
-            print("No hay ningun Real Truth")
-            exit(-1)
+                    acum[key] = torch.cat((acum[key], mol[key]))
 
-        # Hidrogeno
-        if len(prop["H"]) != 0 and self.coeff and not self.proj and not self.AEV:
-            prop["H"] = torch.tensor(prop["H"]).view(-1,4)
-        elif len(prop["H"]) != 0 and self.coeff and self.proj and not self.AEV:
-            prop["H"] = torch.tensor(prop["H"]).view(-1,8)
-        elif len(prop["H"]) != 0 and self.coeff and self.proj and self.AEV:
-            prop["H"] = torch.tensor(prop["H"]).view(-1,8 + 4 * self.nrad + 10 * self.nang)
-        else:
-            prop["H"] = torch.tensor([0.])
+        # El diccionario acum acumula la informacion de todo el dataset.
+        # Ahora hay que calcular las medias y desviaciones de cada feature
+        # para cada elemento.
 
-        # Carbono
-        if len(prop["C"]) != 0 and self.coeff and not self.proj and not self.AEV:
-            prop["C"] = torch.tensor(prop["C"]).view(-1,13)
-        elif len(prop["C"]) != 0 and self.coeff and self.proj and not self.AEV:
-            prop["C"] = torch.tensor(prop["C"]).view(-1,26)
-        elif len(prop["C"]) != 0 and self.coeff and self.proj and self.AEV:
-            prop["C"] = torch.tensor(prop["C"]).view(-1,26 + 4 * self.nrad + 10 * self.nang)
-        else:
-            prop["C"] = torch.tensor([0.])
+        # Calculamos la media y la desviacion estandar del target
+        fact["T"]["mean"] = acum["T"].mean()
+        fact["T"]["std"]  = acum["T"].std()
 
-        # Nitrogeno
-        if len(prop["N"]) != 0 and self.coeff and not self.proj and not self.AEV:
-            prop["N"] = torch.tensor(prop["N"]).view(-1,13)
-        elif len(prop["N"]) != 0 and self.coeff and self.proj and not self.AEV:
-            prop["N"] = torch.tensor(prop["N"]).view(-1,26)
-        elif len(prop["N"]) != 0 and self.coeff and self.proj and self.AEV:
-            prop["N"] = torch.tensor(prop["N"]).view(-1,26 + 4 * self.nrad + 10 * self.nang)
-        else:
-            prop["N"] = torch.tensor([0.])
+        # Calculamos media y desviacion estandar para cada elemento, y cada una
+        # de las features (o sea, densidad y sus gradientes)
+        for key in ["H", "C", "N", "O"]:
+            # Primero promediamos sobre los atomos
+            overat = acum[key].mean(0)
+            # Y despues sobre las grillas
+            fact[key]["mean"] = torch.rand(4)
+            fact[key]["std"]  = torch.rand(4)
+            for ii in range(4):
+                fact[key]["mean"][ii] = overat[ii].mean().item()
+                fact[key]["std"][ii]  = overat[ii].std().item()
 
-        # Oxigeno
-        if len(prop["O"]) != 0 and self.coeff and not self.proj and not self.AEV:
-            prop["O"] = torch.tensor(prop["O"]).view(-1,13)
-        elif len(prop["O"]) != 0 and self.coeff and self.proj and not self.AEV:
-            prop["O"] = torch.tensor(prop["O"]).view(-1,26)
-        elif len(prop["O"]) != 0 and self.coeff and self.proj and self.AEV:
-            prop["O"] = torch.tensor(prop["O"]).view(-1,26 + 4 * self.nrad + 10 * self.nang)
-        else:
-            prop["O"] = torch.tensor([0.])
-
-        ff = {
-            "T": {
-                "mean": prop["T"].mean(dim=0),
-                "std" : prop["T"].std(dim=0),
-            },
-            "H": {
-                "mean": prop["H"].mean(dim=0),
-                "std" : prop["H"].std(dim=0),
-            },
-            "C": {
-                "mean": prop["C"].mean(dim=0),
-                "std" : prop["C"].std(dim=0),
-            },
-            "N": {
-                "mean": prop["N"].mean(dim=0),
-                "std" : prop["N"].std(dim=0),
-            },
-            "O": {
-                "mean": prop["O"].mean(dim=0),
-                "std" : prop["O"].std(dim=0),
-            },
-        }
-
-        # Guardo los factores de Norm en un archivo
+        # Guardamos los factores de normalizacion en un archivo
         try:
             name = self.path_dir + "factors_norm.pickle"
             with open(name,"wb") as f:
-                pickle.dump(ff, f,pickle.HIGHEST_PROTOCOL)
+                pickle.dump(fact, f,pickle.HIGHEST_PROTOCOL)
         except:
             print("No se pudo escribir los",end=" ")
             print("factores de normalizacion")
             exit(-1)
 
-        return ff
+        print(str(np.round(time.time() - init, 2)) + " s.")
+        return fact
 
     def _normalize(self,data,fact):
+        init = time.time()
+        print("Normalizando los datos... ", end = " ")
         data_norm = []
+        size = self.grid_size 
 
         for mol in data:
             mol_norm = {}
 
-            # Normalizo el Real Truth
+            # Normalizo el Target
             Tn = (mol["T"] - fact["T"]["mean"]) / fact["T"]["std"]
             mol_norm["T"] = Tn
 
             # Normalizamos los atomos
             for key in ["H","C","N","O"]:
-                nat = len(mol[key])
-                if nat != 0:
-                    ff = torch.zeros(nat,mol[key].shape[1])
-                    for ii in range(nat):
-                        ff[ii,:] = (mol[key][ii,:]-fact[key]["mean"])
-                        ff[ii,:] /= fact[key]["std"]
+                nat = mol[key].shape[0]
+                if  nat != 0:
+                    ff = torch.zeros(nat, 4, size, size, size)
+                    for ii in range(4):
+                        ff[:, ii, :, :, :] = (mol[key][:, ii, :, :, :] - fact[key]["mean"][ii]) \
+                            / fact[key]["std"][ii]
 
                 else:
-                    ff = torch.tensor([])
+                    ff = torch.rand(0, 4, 7, 7, 7)
                 
                 ff = torch.nan_to_num(ff, nan = 0., posinf = 0., neginf = 0.)
                 mol_norm[key] = ff
@@ -409,56 +347,8 @@ class DataModule(pl.LightningDataModule):
             # Genero el arreglo normalizado
             data_norm.append(mol_norm)
 
-            """
-            # Inicializamos variables
-            Exc = torch.zeros(1)
-            H = torch.zeros(mol["Hidrogen"].shape[0],
-                            mol["Hidrogen"].shape[1])
-            C = torch.zeros(mol["Carbon"].shape[0],
-                            mol["Carbon"].shape[1])
-            N = torch.zeros(mol["Nitrogen"].shape[0],
-                            mol["Nitrogen"].shape[1])
-
-
-            Exc  = ( mol["targets"]-fact["mean_Exc"] ) 
-            Exc /= fact["std_Exc"]
-
-            H[0,:] = ( mol["Hidrogen"][0,:]-fact["mean_H"] )
-            H[0,:] /= fact["std_H"]
-            H[1,:] = ( mol["Hidrogen"][1,:]-fact["mean_H"] )
-            H[1,:] /= fact["std_H"]
-
-            C[0,:] = ( mol["Carbon"][0,:]-fact["mean_C"] )
-            C[0,:] /= fact["std_C"]
-
-            N[0,:] = ( mol["Nitrogen"][0,:]-fact["mean_N"] )
-            N[0,:] /= fact["std_N"]
-            N[1,:] = ( mol["Nitrogen"][1,:]-fact["mean_N"] )
-            N[1,:] /= fact["std_N"]
-
-            data_norm.append({
-                "targets": Exc,
-                "Hidrogen": H,
-                "Carbon": C,
-                "Nitrogen": N,
-            })
-            """
-
+        print(str(np.round(time.time() - init, 2)) + " s.")
         return data_norm
-
-    def _read_indices(self):
-        numbers = []
-        name = self.path_dir + "index_test.txt"
-        try:
-            with open(name, 'r') as file:
-                for linea in file:
-                    numbers.append(int(linea))
-        except:
-            print("No se pudo leer el",end=" ")
-            print("archivo " + name)
-            exit(-1)
-        
-        return numbers
 
     def _read_norm(self):
         name = self.path_dir + "factors_norm.pickle"
@@ -472,44 +362,95 @@ class DataModule(pl.LightningDataModule):
         
         return factor_norm
 
-    def _validation_out(self, nval):
-        # Leo el dataset de validation
-        path = self.val_path
-        data = self._load_data(path)
+# Modelos Atomicos
+class Linear_Model(pl.LightningModule):
+    def __init__(self, size):
+        super(Linear_Model, self).__init__()
 
-        # Genero la lista de randoms
-        ndata = len(data)
-        random.seed(self.seed)
-        rand = list(range(ndata))
-        random.shuffle(rand)
-        rand = rand[:nval]
-
-        # Extraigo la cantidad necesaria aleatoriamente
-        return self._separate_data(data,rand)
-
-# Modelo de cada Atom Types
-class Atom_Model(pl.LightningModule):
-    def __init__(self,nin):
-        super(Atom_Model, self).__init__()
-
+        self.nin = 4*(size**3)
         # Arquitectura de la NN
-        self.fc1 = nn.Linear(nin,1024)
-        #self.batchnorm1 = nn.BatchNorm1d(128)
+        self.fc1 = nn.Linear(self.nin,1024)
         self.fc2 = nn.Linear(1024,512)
-        #self.batchnorm2 = nn.BatchNorm1d(64)
-        #self.fc3 = nn.Linear(64,32)
-        self.fc4 = nn.Linear(512,1)
+        self.fc3 = nn.Linear(512,1)
 
         self.act = nn.PReLU(num_parameters=1,init=0.25)
 
     def forward(self,x):
         if len(x) != 0:
+            x = x.view(-1, self.nin)
             out = self.act(self.fc1(x))
-            #out = self.batchnorm1(out)
             out = self.act(self.fc2(out))
-            #out = self.batchnorm2(out)
-            #out = self.act(self.fc3(out))
-            out = self.fc4(out)
+            out = self.fc3(out)
+        else:
+            out = torch.tensor([])
+
+        return out
+
+class Conv_Model(pl.LightningModule):
+    def __init__(self):
+        super(Conv_Model, self).__init__()
+
+        # Arquitectura de la NN
+        self.network = nn.Sequential(
+            nn.Conv3d(4, 16, kernel_size=3, stride = 1, padding=1),
+            nn.PReLU(),
+            nn.Conv3d(16, 32, kernel_size=3, stride = 1, padding=1),
+            nn.PReLU(),
+            nn.MaxPool3d(2, 2), # output: 32 x 3 x 3 x 3
+
+            nn.Conv3d(32, 64, kernel_size=2, stride=1, padding=1),
+            nn.PReLU(),
+            nn.MaxPool3d(2, 2), # output: 64 x 2 x 2 x 2
+
+            nn.Flatten(), 
+            nn.Linear(512, 64),
+            nn.PReLU(),
+            nn.Linear(64, 32),
+            nn.PReLU(),
+            nn.Linear(32, 1))
+
+    def forward(self,x):
+        if len(x) != 0:
+            out = self.network(x)
+        else:
+            out = torch.tensor([])
+
+        return out
+
+def conv_block(in_channels, out_channels, pool=False):
+    layers = [nn.Conv3d(in_channels, out_channels, kernel_size=3, padding=1), 
+              nn.PReLU()]
+    if pool: layers.append(nn.MaxPool3d(2, 2))
+    return nn.Sequential(*layers)
+
+class Res_Model(pl.LightningModule):
+    def __init__(self):
+        super(Res_Model, self).__init__()
+
+        # Arquitectura de la NN
+        self.conv1 = conv_block(4, 16)
+        self.conv2 = conv_block(16, 32, pool=True)
+        self.res1 = nn.Sequential(conv_block(32, 32), conv_block(32, 32))
+        
+        self.conv3 = conv_block(32, 64)
+        self.conv4 = conv_block(64, 128)
+        self.res2 = nn.Sequential(conv_block(128, 128), conv_block(128, 128))
+        
+        self.classifier = nn.Sequential(nn.MaxPool3d(2, 2), 
+                                        nn.Flatten(), 
+                                        nn.Dropout(0.2),
+                                        nn.Linear(128, 1))
+
+    def forward(self,x):
+        if len(x) != 0:
+            out = self.conv1(x)
+            out = self.conv2(out)
+            out = self.res1(out) + out
+            out = self.conv3(out)
+            out = self.conv4(out)
+            out = self.res2(out) + out
+            out = self.classifier(out)
+            return out
         else:
             out = torch.tensor([])
 
@@ -520,41 +461,31 @@ class Modelo(pl.LightningModule):
     def __init__(self,config):
         super().__init__()
 
-        # Guardamos los hyperparametros
+        # Guardamos los hiperparametros
         self.save_hyperparameters(config)
-
-        # Atoms Model
-        # Hidrogeno
-        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
-            self.Hydrogen  = Atom_Model(8)
-        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
-            self.Hydrogen  = Atom_Model(8 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
-        else:
-            self.Hydrogen  = Atom_Model(4)
+        self.mod_type = self.hparams.Model
+        self.size = self.hparams.grid_size
         
-        # Carbono
-        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
-            self.Carbon  = Atom_Model(26)
-        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
-            self.Carbon  = Atom_Model(26 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
+        # Instanciamos los modelos de cada elemento
+        if self.mod_type == "Linear":
+            self.Hydrogen  = Linear_Model(self.size)
+            self.Carbon    = Linear_Model(self.size)
+            self.Nitrogen  = Linear_Model(self.size)
+            self.Oxygen    = Linear_Model(self.size)
+        elif self.mod_type == "Conv":
+            self.Hydrogen  = Conv_Model()
+            self.Carbon    = Conv_Model()
+            self.Nitrogen  = Conv_Model()
+            self.Oxygen    = Conv_Model()
+        elif self.mod_type == "Res":
+            self.Hydrogen  = Res_Model()
+            self.Carbon    = Res_Model()
+            self.Nitrogen  = Res_Model()
+            self.Oxygen    = Res_Model()
         else:
-            self.Carbon  = Atom_Model(13)
-
-        # Nitrogeno
-        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
-            self.Nitrogen  = Atom_Model(26)
-        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
-            self.Nitrogen  = Atom_Model(26 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
-        else:
-            self.Nitrogen  = Atom_Model(13)
-
-        # Oxigeno
-        if self.hparams.coeff and self.hparams.proj and not self.hparams.AEV:
-            self.Oxygen  = Atom_Model(26)
-        elif self.hparams.coeff and self.hparams.proj and self.hparams.AEV:
-            self.Oxygen  = Atom_Model(26 + 4 * self.hparams.nrad + 10 * self.hparams.nang)
-        else:
-            self.Oxygen  = Atom_Model(13)
+            print("Solo se permiten redes neuronales feedforward (Linear),\
+                convolucionales (Conv) o residuales (Res)")
+            exit(-1)
         
         # Loss Function
         self.err = getattr(nn,self.hparams.Loss)()
@@ -576,7 +507,7 @@ class Modelo(pl.LightningModule):
         if len(out_H) != 0:
             start = 0
             for mol in range(nmol):
-                for at in range(start,start+Hw[mol,0]):
+                for at in range(int(start),int(start+Hw[mol,0].item())):
                     out[mol] += out_H[at]
                 start += Hw[mol,0].item()
         
@@ -584,7 +515,7 @@ class Modelo(pl.LightningModule):
         if len(out_C) != 0:
             start = 0
             for mol in range(nmol):
-                for at in range(start,start+Hw[mol,1]):
+                for at in range(int(start),int(start+Hw[mol,1].item())):
                     out[mol] += out_C[at]
                 start += Hw[mol,1].item()
         
@@ -592,7 +523,7 @@ class Modelo(pl.LightningModule):
         if len(out_N) != 0:
             start = 0
             for mol in range(nmol):
-                for at in range(start,start+Hw[mol,2]):
+                for at in range(int(start),int(start+Hw[mol,2].item())):
                     out[mol] += out_N[at]
                 start += Hw[mol,2].item()
 
@@ -600,7 +531,7 @@ class Modelo(pl.LightningModule):
         if len(out_O) != 0:
             start = 0
             for mol in range(nmol):
-                for at in range(start,start+Hw[mol,3]):
+                for at in range(int(start),int(start+Hw[mol,3].item())):
                     out[mol] += out_O[at]
                 start += Hw[mol,3].item()
 
@@ -671,18 +602,18 @@ class Modelo(pl.LightningModule):
 
         return [optim], [lr_scheduler]
 
-    def graficar(self):
-        plt.title("LOSS")
-        plt.plot(self.train_loss,label="train")
-        plt.plot(self.val_loss,label="val")
+    def graph_train(self):
+        plt.title("Loss Function")
+        plt.plot(self.train_loss,label="Training")
+        plt.plot(self.val_loss,label="Validation")
         plt.yscale("log")
-        plt.ylabel("MSE")
+        plt.ylabel("MAE")
         plt.xlabel("Epoch")
         plt.legend()
         path = self.hparams.path_results
         plt.savefig(path + "/loss_train.png")
 
-    def graficar_test(self,fact):
+    def graph_test(self,fact):
         path = self.hparams.path_results
         pred = torch.tensor(self.pred)
         real = torch.tensor(self.real)
@@ -695,7 +626,7 @@ class Modelo(pl.LightningModule):
         pred = pred.detach().numpy()
         real = real.detach().numpy()
 
-        # Calculamos la mae
+        # Calculamos el MAE
         mae = np.abs(pred-real).mean()
 
         # Ajuste Lineal de los datos
@@ -703,8 +634,8 @@ class Modelo(pl.LightningModule):
                        stats.linregress(real,pred)
 
         # Graficamos los Datos
-        title = "Energia Kcal/mol"
-        etiqueta = "MAE " + str(np.round(mae,2)) + "Kcal/mol"
+        title = "Energia predicha vs Real"
+        etiqueta = "MAE " + str(np.round(mae,2)) + "kcal/mol"
         plt.title(title)
         plt.plot(real,pred,"o",label=etiqueta)
         plt.legend()
@@ -716,7 +647,7 @@ class Modelo(pl.LightningModule):
         plt.legend()
 
         plt.xlabel("Real [Kcal/mol]")
-        plt.ylabel("Pred [Kcal/mol]")
+        plt.ylabel("Predicho [Kcal/mol]")
         
         # Guardamos la figura
         plt.savefig(path+"/pred_vs_real.png")
@@ -724,9 +655,3 @@ class Modelo(pl.LightningModule):
         # Guardamos los resultados
         np.savetxt(path+"/pred.txt",pred)
         np.savetxt(path+"/real.txt",real)
-
-
-
-
-
-
