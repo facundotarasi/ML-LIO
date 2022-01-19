@@ -396,18 +396,18 @@ class Conv_Model(pl.LightningModule):
             nn.PReLU(),
             nn.Conv3d(16, 32, kernel_size=3, stride = 1, padding=1),
             nn.PReLU(),
-            nn.MaxPool3d(2, 2), # output: 32 x 3 x 3 x 3
+            nn.MaxPool3d(2, 1), # output: 32 x 3 x 3 x 3
 
-            nn.Conv3d(32, 64, kernel_size=2, stride=1, padding=1),
+            nn.Conv3d(32, 64, kernel_size=3, stride=1, padding=1),
             nn.PReLU(),
             nn.MaxPool3d(2, 2), # output: 64 x 2 x 2 x 2
 
             nn.Flatten(), 
+            nn.Linear(64*3*3*3, 512),
+            nn.PReLU(),
             nn.Linear(512, 64),
             nn.PReLU(),
-            nn.Linear(64, 32),
-            nn.PReLU(),
-            nn.Linear(32, 1))
+            nn.Linear(64, 1))
 
     def forward(self,x):
         if len(x) != 0:

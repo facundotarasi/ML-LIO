@@ -21,7 +21,7 @@ inputs = mod.read_input(args.inputs)
 pl.seed_everything(inputs["seed"], workers=True)
 
 # Resultados
-inputs["path_results"] = inputs["path_dir"] + "results/"
+inputs["path_results"] = inputs["path_dir"] + inputs["folder"]
 
 Data = mod.DataModule(inputs)
 Data.setup(stage = "test")
