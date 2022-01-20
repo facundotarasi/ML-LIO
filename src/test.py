@@ -3,6 +3,7 @@
 import modules as mod
 import pytorch_lightning as pl
 import argparse
+import os 
 
 # Argumentos
 parser = argparse.ArgumentParser()
@@ -21,6 +22,7 @@ inputs = mod.read_input(args.inputs)
 pl.seed_everything(inputs["seed"], workers=True)
 
 # Resultados
+inputs["folder"] = os.getcwd()
 inputs["path_results"] = inputs["path_dir"] + inputs["folder"]
 
 Data = mod.DataModule(inputs)

@@ -15,6 +15,7 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scipy import stats
 import yaml
+import os 
 
 # Leemos el yaml file de input
 def read_input(files):
@@ -39,10 +40,10 @@ class Dataset(torch.utils.data.Dataset):
         mol = self.my_data[idx]
         how_many = mol["How_many"]
         atomic = mol["Atno"]
+        size = self.grid_size 
         sample = {}
-        size = self.grid_size
-        fH, fC = torch.rand(0,4, size, size, size), torch.rand(0, 4, size, size, size)
-        fN, fO = torch.rand(0,4, size, size, size), torch.rand(0, 4, size, size, size)
+        fH, fC = [], []
+        fN, fO = [], []
 
         # Real Truth
         sample["T"] = mol["T"]
@@ -50,31 +51,43 @@ class Dataset(torch.utils.data.Dataset):
         for jj in range(atomic.shape[0]):
             if int(atomic[jj].item()) == 1:
                 stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
-                fH = torch.cat((fH, torch.unsqueeze(stack, 0)))
+                fH.append(torch.unsqueeze(stack, 0))
             elif int(atomic[jj].item()) == 6:
                 stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
-                fC = torch.cat((fC, torch.unsqueeze(stack, 0)))
+                fC.append(torch.unsqueeze(stack, 0))
             elif int(atomic[jj].item()) == 7:
                 stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
-                fN = torch.cat((fN, torch.unsqueeze(stack, 0)))
+                fN.append(torch.unsqueeze(stack, 0))
             elif int(atomic[jj].item()) == 8:
                 stack = torch.stack(([mol["Dens"][jj], mol["Gradx"][jj], mol["Grady"][jj], mol["Gradz"][jj]]))
-                fO = torch.cat((fO, torch.unsqueeze(stack, 0)))
+                fO.append(torch.unsqueeze(stack, 0))
             else:
                 print("Sólo se permiten los elmentos C, H, O, N")
                 exit(-1)
         
         # Hidrogeno
-        sample["H"] = fH
+        if len(fH) == 0:
+            sample["H"] = torch.rand(0, 4, size, size, size)
+        else:
+            sample["H"] = torch.cat(fH)
         
         # Carbono
-        sample["C"] = fC
+        if len(fC) == 0:
+            sample["C"] = torch.rand(0, 4, size, size, size)
+        else:
+            sample["C"] = torch.cat(fC)
 
         # Nitrogeno
-        sample["N"] = fN 
+        if len(fN) == 0:
+            sample["N"] = torch.rand(0, 4, size, size, size)
+        else:
+            sample["N"] = torch.cat(fN)
 
         # Oxigeno
-        sample["O"] = fO 
+        if len(fO) == 0:
+            sample["O"] = torch.rand(0, 4, size, size, size)
+        else:
+            sample["O"] = torch.cat(fO) 
 
         # TODO How Many: Por el momento lo guardo despues veo
         # TODO: si es necesario o no
@@ -84,19 +97,22 @@ class Dataset(torch.utils.data.Dataset):
 
 def collate_fn(batch):
     tmp = {
-        "T": torch.rand(0, 1),
-        "H": torch.rand(0, 4, 7, 7, 7),
-        "C": torch.rand(0, 4, 7, 7, 7),
-        "N": torch.rand(0, 4, 7, 7, 7),
-        "O": torch.rand(0, 4, 7, 7, 7),
-        "how_many": torch.rand(0, 4),
+        "T": [],
+        "H": [],
+        "C": [],
+        "N": [],
+        "O": [],
+        "how_many": [],
     }
     for mol in batch:
-        tmp["T"] = torch.cat((tmp["T"], mol["T"].unsqueeze(0)))
-        tmp["how_many"] = torch.cat((tmp["how_many"], mol["how_many"].unsqueeze(0)))
+        tmp["T"].append(mol["T"].unsqueeze(0))
+        tmp["how_many"].append(mol["how_many"].unsqueeze(0))
 
         for key in ["H","C","N","O"]:
-            tmp[key] = torch.cat((tmp[key], mol[key]))
+            tmp[key].append(mol[key])
+    
+    for key in tmp:
+        tmp[key] = torch.cat(tmp[key])
 
     return tmp
 
@@ -143,8 +159,16 @@ class DataModule(pl.LightningDataModule):
                 train_ds = self._transform(train_ds)
                 val_ds = self._transform(val_ds)
 
-            # Obtenemos los factores de normalizacion
-            self.factor_norm = self._get_norm(train_ds)
+            # Obtenemos o leemos los factores de normalizacion
+            if self.transform:
+                ffee = self.path_dir + "factors_norm_trans.pickle"
+            else:
+                ffee = self.path_dir + "factors_norm_untr.pickle"
+
+            if os.path.isfile(ffee):
+                self.factor_norm = self._read_norm()
+            else:
+                self.factor_norm = self._get_norm(train_ds)
 
             # Normalizamos los datos de train y validation
             self.train_ds = self._normalize(train_ds,self.factor_norm)
@@ -180,7 +204,6 @@ class DataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_ds, batch_size=self.batch_size,
                           shuffle=False, collate_fn=collate_fn, num_workers=4)
-
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
                           shuffle=False, collate_fn=collate_fn, num_workers=4)
@@ -266,19 +289,22 @@ class DataModule(pl.LightningDataModule):
         }
 
         acum = {
-            "T": torch.rand(0, 1),
-            "H": torch.rand(0, 4, size, size, size),
-            "C": torch.rand(0, 4, size, size, size), 
-            "N": torch.rand(0, 4, size, size, size),
-            "O": torch.rand(0, 4, size, size, size),
+            "T": [],
+            "H": [],
+            "C": [], 
+            "N": [],
+            "O": [],
         }
 
         for mol in data:
             for key in mol:
                 if key == "T":
-                    acum[key] = torch.cat((acum[key], torch.unsqueeze(mol[key], 0)))
+                    acum[key].append(torch.unsqueeze(mol[key], 0))
                 elif key != "how_many":
-                    acum[key] = torch.cat((acum[key], mol[key]))
+                    acum[key].append(mol[key])
+
+        for key in acum:
+            acum[key] = torch.cat(acum[key])
 
         # El diccionario acum acumula la informacion de todo el dataset.
         # Ahora hay que calcular las medias y desviaciones de cada feature
@@ -302,7 +328,10 @@ class DataModule(pl.LightningDataModule):
 
         # Guardamos los factores de normalizacion en un archivo
         try:
-            name = self.path_dir + "factors_norm.pickle"
+            if self.transform:
+                name = self.path_dir + "factors_norm_trans.pickle"
+            else:
+                name = self.path_dir + "factors_norm_untr.pickle"
             with open(name,"wb") as f:
                 pickle.dump(fact, f,pickle.HIGHEST_PROTOCOL)
         except:
@@ -351,7 +380,10 @@ class DataModule(pl.LightningDataModule):
         return data_norm
 
     def _read_norm(self):
-        name = self.path_dir + "factors_norm.pickle"
+        if self.transform:
+            name = self.path_dir + "factors_norm_trans.pickle"
+        else:
+            name = self.path_dir + "factors_norm_untr.pickle"
         try:
             with open(name,"rb") as f:
                 factor_norm = pickle.load(f)
