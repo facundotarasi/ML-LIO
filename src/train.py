@@ -1,7 +1,6 @@
 #!/usr/bin/env python3.8
 
 import modules as mod
-import os
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import EarlyStopping
 from pytorch_lightning.callbacks import LearningRateMonitor
@@ -25,7 +24,6 @@ inputs = mod.read_input(args.inputs)
 pl.seed_everything(inputs["seed"], workers=True)
 
 # Resultados
-inputs["folder"] = os.getcwd()
 inputs["path_results"] = inputs["path_dir"] + inputs["folder"]
 
 Data = mod.DataModule(inputs)
@@ -44,10 +42,6 @@ if inputs["restart"]:
         exit(-1)
 else:
     model = mod.Modelo(inputs)
-
-# Abrimos un folder para los resultados
-if os.path.isdir(inputs["path_results"]) and not inputs["restart"]:
-    os.system("rm -rf " + inputs["path_results"])
 
 # Checkpoint del Modelo
 if not inputs["restart"]: checkpoint = ModelCheckpoint(

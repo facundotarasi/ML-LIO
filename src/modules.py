@@ -497,6 +497,7 @@ class Modelo(pl.LightningModule):
         self.save_hyperparameters(config)
         self.mod_type = self.hparams.Model
         self.size = self.hparams.grid_size
+        self.batch_size = self.hparams.batch_size
         
         # Instanciamos los modelos de cada elemento
         if self.mod_type == "Linear":
@@ -580,7 +581,8 @@ class Modelo(pl.LightningModule):
 
         pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
-        self.log("train_loss",loss,on_epoch=True,on_step=False,prog_bar=True)
+        self.log("train_loss",loss,on_epoch=True,on_step=False,prog_bar=True,
+        batch_size = self.batch_size)
 
         return loss
 
@@ -595,7 +597,8 @@ class Modelo(pl.LightningModule):
 
         pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
-        self.log("val_loss",loss,on_epoch=True,on_step=False,prog_bar=True)
+        self.log("val_loss",loss,on_epoch=True,on_step=False,prog_bar=True, 
+        batch_size = self.batch_size)
 
         return loss
 
