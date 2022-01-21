@@ -36,7 +36,7 @@ except:
     exit(-1)
 
 # Instanciamos el Trainer
-trainer = pl.Trainer(max_epochs=0, gpus=inputs["gpu"])
+trainer = pl.Trainer(max_epochs=0, gpus=inputs["gpu"], enable_progress_bar = False)
 trainer.test(model=model,datamodule=Data)
 
 # Graficamos resultados del test

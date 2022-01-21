@@ -68,9 +68,9 @@ lr_monitor = LearningRateMonitor(logging_interval="epoch")
 calls = [checkpoint,early_stopping,lr_monitor]
 if inputs["restart"]:
     trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=inputs["gpu"],callbacks=calls, resume_from_checkpoint = 
-    inputs["path_results"] + inputs["model_file"])
+    inputs["path_results"] + inputs["model_file"], enable_progress_bar = False)
 else:
-    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=inputs["gpu"],callbacks=calls)
+    trainer = pl.Trainer(max_epochs=inputs["nepochs"], gpus=inputs["gpu"],callbacks=calls, enable_progress_bar = False)
 trainer.fit(model=model,datamodule=Data)
 
 # Graficamos resultados del train
