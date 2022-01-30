@@ -212,16 +212,16 @@ class DataModule(pl.LightningDataModule):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
                           shuffle=False, collate_fn=collate_fn, num_workers=2)
 
-    #def transfer_batch_to_device(self, batch, device, dataloader_idx):
-    #    if self.gpu != 0:
-    #        device = 'cuda'
-    #    else:
-    #        device = 'cpu'
-    #       
-    #    if isinstance(batch, (list, tuple)):
-    #        for ii in range(len(batch)):
-    #            batch[ii] = batch[ii].to(device)
-    #    return batch
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        if self.gpu != 0:
+            device = 'cuda'
+        else:
+            device = 'cpu'
+           
+        if isinstance(batch, (list, tuple)):
+            for ii in range(len(batch)):
+                batch[ii] = batch[ii].to(device)
+        return batch
 
     def _load_data(self, currstat):
         init = time.time()
