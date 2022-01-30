@@ -463,7 +463,7 @@ class Linear_Model(pl.LightningModule):
             out = self.act(self.fc2(out))
             out = self.fc3(out)
         else:
-            out = torch.tensor([])
+            out = torch.tensor([]).to(device = get_default_device())
 
         return out
 
@@ -494,7 +494,7 @@ class Conv_Model(pl.LightningModule):
         if len(x) != 0:
             out = self.network(x)
         else:
-            out = torch.tensor([])
+            out = torch.tensor([]).to(device = get_default_device())
 
         return out
 
@@ -533,7 +533,7 @@ class Res_Model(pl.LightningModule):
             out = self.classifier(out)
             return out
         else:
-            out = torch.tensor([])
+            out = torch.tensor([]).to(device = get_default_device())
 
         return out
 
@@ -582,7 +582,7 @@ class Modelo(pl.LightningModule):
         out_N = self.Nitrogen(N)
         out_O = self.Oxygen(O)
         nmol  = Hw.shape[0]
-        out   = torch.zeros(nmol,1)
+        out   = torch.zeros(nmol,1).to(device = get_default_device())
 
         # Sumo los resultados
         # Hidrogeno
