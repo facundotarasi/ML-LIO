@@ -128,6 +128,7 @@ class DataModule(pl.LightningDataModule):
         self.indexes = hooks["indexes"]
         self.grid_size = hooks["grid_size"]
         self.transform = hooks["transform"]
+        self.gpu = hooks["gpu"]
 
         # Seteamos la seed
         if self.seed != None:
@@ -207,6 +208,17 @@ class DataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
                           shuffle=False, collate_fn=collate_fn, num_workers=4)
+
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        if self.gpu != 0:
+            device = 'cuda'
+        else:
+            device = 'cpu'
+            
+        if isinstance(batch, dict):
+            for key in batch:
+                batch[key] = batch[key].to(device)
+        return batch
 
     def _load_data(self, currstat):
         init = time.time()
