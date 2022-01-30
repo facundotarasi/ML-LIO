@@ -96,58 +96,26 @@ class Dataset(torch.utils.data.Dataset):
         return sample
 
 def collate_fn(batch):
-    # Generar batches que sean diccionarios parece causar problemas al
-    # pasar los datos a GPU. Se propone hacer una lista donde:
-    # Primer elemento: Target
-    # Segundo elemento: H
-    # Tercer elemento: C
-    # Cuarto elemento: N
-    # Quinto elemento: O
-    # Sexto elemento: how_many
-    tmp = [[], [], [], [], [], []]
-    for mol in batch:
-        tmp[0].append(mol["T"].unsqueeze(0))
-        tmp[5].append(mol["how_many"].unsqueeze(0))
+    tmp = {
+        "T": [],
+        "H": [],
+        "C": [],
+        "N": [],
+        "O": [],
+        "how_many": [],
+    }
 
-        count = 1
+    for mol in batch:
+        tmp["T"].append(mol["T"].unsqueeze(0))
+        tmp["how_many"].append(mol["how_many"].unsqueeze(0))
+
         for key in ["H","C","N","O"]:
-            tmp[count].append(mol[key])
-            count += 1
+            tmp[key].append(mol[key])
     
-    for ii in range(len(tmp)):
-        tmp[ii] = torch.cat(tmp[ii])
+    for key in tmp:
+        tmp[key] = torch.cat(tmp[key])
 
     return tmp
-
-def get_default_device():
-    """Pick GPU if available, else CPU"""
-    if torch.cuda.is_available():
-        return torch.device('cuda')
-    else:
-        return torch.device('cpu')
-    
-def to_device(data, device):
-    """Move tensor(s) to chosen device"""
-    if isinstance(data, (list,tuple)):
-        return [to_device(x, device) for x in data]
-    elif isinstance(data, dict):
-        return [to_device(data[x], device) for x in data]
-    return data.to(device, non_blocking=True)
-
-class DeviceDataLoader():
-    """Wrap a dataloader to move data to a device"""
-    def __init__(self, dl, device):
-        self.dl = dl
-        self.device = device
-        
-    def __iter__(self):
-        """Yield a batch of data after moving it to device"""
-        for b in self.dl: 
-            yield to_device(b, self.device)
-
-    def __len__(self):
-        """Number of batches"""
-        return len(self.dl)
 
 # Definicion del DataModule
 class DataModule(pl.LightningDataModule):
@@ -161,7 +129,6 @@ class DataModule(pl.LightningDataModule):
         self.indexes = hooks["indexes"]
         self.grid_size = hooks["grid_size"]
         self.transform = hooks["transform"]
-        self.gpu = hooks["gpu"]
 
         # Seteamos la seed
         if self.seed != None:
@@ -232,30 +199,16 @@ class DataModule(pl.LightningDataModule):
             self.test_ds = self._normalize(test_ds,self.factor_norm)
             
     def train_dataloader(self):
-        return DeviceDataLoader(DataLoader(self.train_ds, batch_size=self.batch_size,
-                          shuffle=True, collate_fn=collate_fn, num_workers=2),
-                          device = get_default_device())
+        return DataLoader(self.train_ds, batch_size=self.batch_size,
+                          shuffle=True, collate_fn=collate_fn, num_workers=2)
 
     def val_dataloader(self):
-        return DeviceDataLoader(DataLoader(self.val_ds, batch_size=self.batch_size,
-                          shuffle=False, collate_fn=collate_fn, num_workers=2), 
-                          device = get_default_device())
+        return DataLoader(self.val_ds, batch_size=self.batch_size,
+                          shuffle=False, collate_fn=collate_fn, num_workers=2)
 
     def test_dataloader(self):
-        return DeviceDataLoader(DataLoader(self.test_ds, batch_size=self.batch_size,
-                          shuffle=False, collate_fn=collate_fn, num_workers=2), 
-                          device = get_default_device())
-
-    #def transfer_batch_to_device(self, batch, device, dataloader_idx):
-    #    if self.gpu != 0:
-    #        device = 'cuda'
-    #    else:
-    #        device = 'cpu'
-    #       
-    #    if isinstance(batch, (list, tuple)):
-    #        for ii in range(len(batch)):
-    #            batch[ii] = batch[ii].to(device)
-    #    return batch
+        return DataLoader(self.test_ds, batch_size=self.batch_size,
+                          shuffle=False, collate_fn=collate_fn, num_workers=2)
 
     def _load_data(self, currstat):
         init = time.time()
@@ -463,7 +416,7 @@ class Linear_Model(pl.LightningModule):
             out = self.act(self.fc2(out))
             out = self.fc3(out)
         else:
-            out = torch.tensor([]).to(device = get_default_device())
+            out = torch.tensor([]).type_as(x)
 
         return out
 
@@ -494,7 +447,7 @@ class Conv_Model(pl.LightningModule):
         if len(x) != 0:
             out = self.network(x)
         else:
-            out = torch.tensor([]).to(device = get_default_device())
+            out = torch.tensor([]).type_as(x)
 
         return out
 
@@ -533,7 +486,7 @@ class Res_Model(pl.LightningModule):
             out = self.classifier(out)
             return out
         else:
-            out = torch.tensor([]).to(device = get_default_device())
+            out = torch.tensor([]).type_as(x)
 
         return out
 
@@ -582,7 +535,7 @@ class Modelo(pl.LightningModule):
         out_N = self.Nitrogen(N)
         out_O = self.Oxygen(O)
         nmol  = Hw.shape[0]
-        out   = torch.zeros(nmol,1).to(device = get_default_device())
+        out   = torch.zeros(nmol,1).type_as(H)
 
         # Sumo los resultados
         # Hidrogeno
@@ -621,12 +574,12 @@ class Modelo(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch[0]
-        H   = batch[1]
-        C   = batch[2]
-        N   = batch[3]
-        O   = batch[4]
-        Hw  = batch[5]
+        real = batch["T"]
+        H   = batch["H"]
+        C   = batch["C"]
+        N   = batch["N"]
+        O   = batch["O"]
+        Hw  = batch["how_many"]
 
         pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
@@ -637,12 +590,12 @@ class Modelo(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch[0]
-        H   = batch[1]
-        C   = batch[2]
-        N   = batch[3]
-        O   = batch[4]
-        Hw  = batch[5]
+        real = batch["T"]
+        H   = batch["H"]
+        C   = batch["C"]
+        N   = batch["N"]
+        O   = batch["O"]
+        Hw  = batch["how_many"]
 
         pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
@@ -653,12 +606,12 @@ class Modelo(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch[0]
-        H   = batch[1]
-        C   = batch[2]
-        N   = batch[3]
-        O   = batch[4]
-        Hw  = batch[5]
+        real = batch["T"]
+        H   = batch["H"]
+        C   = batch["C"]
+        N   = batch["N"]
+        O   = batch["O"]
+        Hw  = batch["how_many"]
 
         pred = self(H,C,N,O,Hw)
 
