@@ -96,23 +96,26 @@ class Dataset(torch.utils.data.Dataset):
         return sample
 
 def collate_fn(batch):
-    tmp = {
-        "T": [],
-        "H": [],
-        "C": [],
-        "N": [],
-        "O": [],
-        "how_many": [],
-    }
+    # Generar batches que sean diccionarios parece causar problemas al
+    # pasar los datos a GPU. Se propone hacer una lista donde:
+    # Primer elemento: Target
+    # Segundo elemento: H
+    # Tercer elemento: C
+    # Cuarto elemento: N
+    # Quinto elemento: O
+    # Sexto elemento: how_many
+    tmp = [[], [], [], [], [], []]
     for mol in batch:
-        tmp["T"].append(mol["T"].unsqueeze(0))
-        tmp["how_many"].append(mol["how_many"].unsqueeze(0))
+        tmp[0].append(mol["T"].unsqueeze(0))
+        tmp[5].append(mol["how_many"].unsqueeze(0))
 
+        count = 1
         for key in ["H","C","N","O"]:
-            tmp[key].append(mol[key])
+            tmp[count].append(mol[key])
+            count += 1
     
-    for key in tmp:
-        tmp[key] = torch.cat(tmp[key])
+    for ii in range(len(tmp)):
+        tmp[ii] = torch.cat(tmp[ii])
 
     return tmp
 
@@ -200,25 +203,25 @@ class DataModule(pl.LightningDataModule):
             
     def train_dataloader(self):
         return DataLoader(self.train_ds, batch_size=self.batch_size,
-                          shuffle=True, collate_fn=collate_fn, num_workers=4)
+                          shuffle=True, collate_fn=collate_fn, num_workers=2)
 
     def val_dataloader(self):
         return DataLoader(self.val_ds, batch_size=self.batch_size,
-                          shuffle=False, collate_fn=collate_fn, num_workers=4)
+                          shuffle=False, collate_fn=collate_fn, num_workers=2)
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=self.batch_size,
-                          shuffle=False, collate_fn=collate_fn, num_workers=4)
+                          shuffle=False, collate_fn=collate_fn, num_workers=2)
 
-    def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        if self.gpu != 0:
-            device = 'cuda'
-        else:
-            device = 'cpu'
-            
-        if isinstance(batch, dict):
-            for key in batch:
-                batch[key] = batch[key].to(device)
-        return batch
+    #def transfer_batch_to_device(self, batch, device, dataloader_idx):
+    #    if self.gpu != 0:
+    #        device = 'cuda'
+    #    else:
+    #        device = 'cpu'
+    #       
+    #    if isinstance(batch, (list, tuple)):
+    #        for ii in range(len(batch)):
+    #            batch[ii] = batch[ii].to(device)
+    #    return batch
 
     def _load_data(self, currstat):
         init = time.time()
@@ -584,12 +587,12 @@ class Modelo(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch["T"]
-        H   = batch["H"]
-        C   = batch["C"]
-        N   = batch["N"]
-        O   = batch["O"]
-        Hw  = batch["how_many"]
+        real = batch[0]
+        H   = batch[1]
+        C   = batch[2]
+        N   = batch[3]
+        O   = batch[4]
+        Hw  = batch[5]
 
         pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
@@ -600,12 +603,12 @@ class Modelo(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch["T"]
-        H   = batch["H"]
-        C   = batch["C"]
-        N   = batch["N"]
-        O   = batch["O"]
-        Hw  = batch["how_many"]
+        real = batch[0]
+        H   = batch[1]
+        C   = batch[2]
+        N   = batch[3]
+        O   = batch[4]
+        Hw  = batch[5]
 
         pred = self(H,C,N,O,Hw)
         loss = self.err(pred,real)
@@ -616,12 +619,12 @@ class Modelo(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         # Extraemos inputs y outputs
-        real = batch["T"]
-        H   = batch["H"]
-        C   = batch["C"]
-        N   = batch["N"]
-        O   = batch["O"]
-        Hw  = batch["how_many"]
+        real = batch[0]
+        H   = batch[1]
+        C   = batch[2]
+        N   = batch[3]
+        O   = batch[4]
+        Hw  = batch[5]
 
         pred = self(H,C,N,O,Hw)
 
