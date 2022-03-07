@@ -569,7 +569,7 @@ class DataModule(pl.LightningDataModule):
             # Genero el arreglo normalizado
             data_norm.append(mol_norm)
 
-        print(str(np.round(time.time(), 2)) + " s.")
+        print(str(np.round(time.time() - init, 2)) + " s.")
         return data_norm 
 
     def _read_norm(self):
