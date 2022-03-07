@@ -28,7 +28,7 @@ def read_input(files):
     return inp
 
 # Generamos el DataSet: 
-class Dataset(torch.utils.data.Dataset):
+class DatasetDens(torch.utils.data.Dataset):
     def __init__(self,data, grid_size):
         self.my_data = data
         self.grid_size = grid_size 
@@ -91,6 +91,66 @@ class Dataset(torch.utils.data.Dataset):
 
         # TODO How Many: Por el momento lo guardo despues veo
         # TODO: si es necesario o no
+        sample["how_many"] = how_many
+
+        return sample
+
+class DatasetCoeff(torch.utils.data.Dataset):
+    def __init__(self, data):
+        self.my_data = data
+    
+    def __len__(self):
+        return len(self.my_data)
+
+    def __getitem__(self,idx):
+        mol = self.my_data[idx]
+        how_many = mol["How_many"]
+        atomic = mol["Atno"]
+        Nucd = mol["Nucd"]
+        coeff = mol["Coeff"]
+        proj = mol["Proj"]
+        sample = {}
+        ff = {1: [], 6: [], 7: [], 8: []}
+
+        # Real Truth
+        sample["T"] = mol["T"]
+
+        for jj in range(len(atomic)):
+            for key in ff:
+                if atomic[jj] == key:
+                    atomc = []
+                    atomp = []
+                    for kk in range(len(Nucd)):
+                        if Nucd[kk] == (jj + 1):
+                            atomc.append(coeff[kk].item())
+                            atomp.append(proj[kk].item())
+                    stack = torch.stack((torch.tensor(atomc), torch.tensor(atomp)))
+                    ff[key].append(torch.unsqueeze(stack, 0))
+
+        # Hidrogeno
+        if len(ff[1]) == 0:
+            sample["H"] = torch.rand(0, 2, 4)
+        else:
+            sample["H"] = torch.cat(ff[1])
+        
+        # Carbono
+        if len(ff[6]) == 0:
+            sample["C"] = torch.rand(0, 2, 34)
+        else:
+            sample["C"] = torch.cat(ff[6])
+
+        # Nitrogeno
+        if len(ff[7]) == 0:
+            sample["N"] = torch.rand(0, 2, 34)
+        else:
+            sample["N"] = torch.cat(ff[7])
+
+        # Oxigeno
+        if len(ff[8]) == 0:
+            sample["O"] = torch.rand(0, 2, 34)
+        else:
+            sample["O"] = torch.cat(ff[8]) 
+
         sample["how_many"] = how_many
 
         return sample
@@ -158,7 +218,8 @@ class DataModule(pl.LightningDataModule):
         self.batch_size = hooks["batch_size"]
         self.indexes = hooks["indexes"]
         self.grid_size = hooks["grid_size"]
-        self.transform = hooks["transform"]
+        if self.grid_size != False: self.transform = hooks["transform"]
+        self.coeff = hooks["coeff"]
 
         # Seteamos la seed
         if self.seed != None:
@@ -180,30 +241,45 @@ class DataModule(pl.LightningDataModule):
             init = time.time()
             print("Generando los DataSets...", end = " ")
 
-            train_ds = Dataset(train_data, self.grid_size)
-            val_ds   = Dataset(val_data, self.grid_size)
+            if self.grid_size != False:
+                train_ds = DatasetDens(train_data, self.grid_size)
+                val_ds   = DatasetDens(val_data, self.grid_size)
+            elif self.coeff == True:
+                train_ds = DatasetCoeff(train_data)
+                val_ds   = DatasetCoeff(val_data)
 
             print(str(np.round(time.time() - init, 2)) + " s.")
 
             # Realizamos las transformaciones si es necesario
-            if self.transform:
-                train_ds = self._transform(train_ds)
-                val_ds = self._transform(val_ds)
+            if self.grid_size != False:
+                if self.transform:
+                    train_ds = self._transform(train_ds)
+                    val_ds = self._transform(val_ds)
 
             # Obtenemos o leemos los factores de normalizacion
-            if self.transform:
-                ffee = self.path_dir + "factors_norm_trans.pickle"
+            if self.grid_size != False:
+                if self.transform:
+                    ffee = self.path_dir + "factors_norm_trans.pickle"
+                else:
+                    ffee = self.path_dir + "factors_norm_untr.pickle"
             else:
-                ffee = self.path_dir + "factors_norm_untr.pickle"
+                ffee = self.path_dir + "factors_norm.pickle"
 
             if os.path.isfile(ffee):
                 self.factor_norm = self._read_norm()
             else:
-                self.factor_norm = self._get_norm(train_ds)
+                if self.grid_size != False:
+                    self.factor_norm = self._get_norm_dens(train_ds)
+                else:
+                    self.factor_norm = self._get_norm_coeff(train_ds)
 
             # Normalizamos los datos de train y validation
-            self.train_ds = self._normalize(train_ds,self.factor_norm)
-            self.val_ds   = self._normalize(val_ds,self.factor_norm)
+            if self.grid_size != False:
+                self.train_ds = self._normalize_dens(train_ds,self.factor_norm)
+                self.val_ds   = self._normalize_dens(val_ds,self.factor_norm)
+            else:
+                self.train_ds = self._normalize_coeff(train_ds,self.factor_norm)
+                self.val_ds   = self._normalize_coeff(val_ds,self.factor_norm)
         
         elif stage == "test":
 
@@ -214,19 +290,26 @@ class DataModule(pl.LightningDataModule):
             init = time.time()
             print("Generando el DataSet...", end = " ")
 
-            test_ds = Dataset(test_data, self.grid_size)
+            if self.grid_size != False:
+                test_ds = DatasetDens(test_data, self.grid_size)
+            elif self.coeff == True:
+                test_ds = DatasetCoeff(test_data)
 
             print(str(np.round(time.time() - init, 2)) + " s.")
 
             # Realizamos las transformaciones si es necesario
-            if self.transform:
-                test_ds = self._transform(test_ds)
+            if self.grid_size != False:
+                if self.transform:
+                    test_ds = self._transform(test_ds)
 
             # Leemos los factores de normalizacion
             self.factor_norm = self._read_norm()
 
             # Normalizamos
-            self.test_ds = self._normalize(test_ds,self.factor_norm)
+            if self.grid_size != False:
+                self.test_ds = self._normalize_dens(test_ds,self.factor_norm)
+            elif self.coeff == True:
+                self.test_ds = self._normalize_coeff(test_ds, self.factor_norm)
             
     def train_dataloader(self):
         return DeviceDataLoader(DataLoader(self.train_ds, batch_size=self.batch_size,
@@ -246,7 +329,7 @@ class DataModule(pl.LightningDataModule):
     def _load_data(self, currstat):
         init = time.time()
         print("Leyendo los archivos de " + currstat + "...", end = " ")
-        # Inicializamo una lista para los datos
+        # Inicializamos una lista para los datos
         list_data = []
         for jj in self.indexes:
             first_ind = int(jj.split()[0])
@@ -311,7 +394,7 @@ class DataModule(pl.LightningDataModule):
         print(str(np.round(time.time() - init, 2)) + " s.")
         return data_trans
     
-    def _get_norm(self,data):
+    def _get_norm_dens(self,data):
         init = time.time()
         print("Calculando los factores de normalizacion...", end = " ")
         size = self.grid_size 
@@ -377,7 +460,56 @@ class DataModule(pl.LightningDataModule):
         print(str(np.round(time.time() - init, 2)) + " s.")
         return fact
 
-    def _normalize(self,data,fact):
+    def _get_norm_coeff(self, data):
+        init = time.time()
+        print("Calculando los factores de normalización", end = " ")
+        fact = {
+            "T": {},
+            "H": {}, 
+            "C": {},
+            "N": {}, 
+            "O": {},
+        }
+
+        acum = {
+            "T": [],
+            "H": [], 
+            "C": [],
+            "N": [], 
+            "O": [],
+        }
+
+        # Para los datos, acumulamos targets y features en el diccionario acum
+        for mol in data:
+            for key in mol:
+                if key == "T":
+                    acum["T"].append(torch.unsqueeze(mol["T"],0))
+                elif key != "how_many":
+                    acum[key].append(mol[key])
+
+        # Juntamos los datos de cada feature y del target en un único tensor
+        for key in acum:
+            acum[key] = torch.cat(acum[key])
+        
+        # Y ahora calculamos la media y desviación estándar de cada cantidad
+        for key in acum:
+            fact[key]["mean"] = acum[key].mean(dim = 0)
+            fact[key]["std"]  = acum[key].std(dim = 0)
+        
+        # Guardamos los factores de normalizacion en un archivo
+        try:
+            name = self.path_dir + "factors_norm.pickle"
+            with open(name,"wb") as f:
+                pickle.dump(fact, f,pickle.HIGHEST_PROTOCOL)
+        except:
+            print("No se pudo escribir los",end=" ")
+            print("factores de normalizacion")
+            exit(-1)
+
+        print(str(np.round(time.time() - init, 2)) + " s.")
+        return fact
+
+    def _normalize_dens(self,data,fact):
         init = time.time()
         print("Normalizando los datos... ", end = " ")
         data_norm = []
@@ -414,11 +546,44 @@ class DataModule(pl.LightningDataModule):
         print(str(np.round(time.time() - init, 2)) + " s.")
         return data_norm
 
+    def _normalize_coeff(self, data, fact):
+        init = time.time()
+        print("Normalizando los datos... ", end = " ")
+        data_norm = []
+
+        for mol in data:
+            mol_norm = {}
+            for key in mol:
+                if key != "how_many" and len(mol[key]) != 0:
+                    mol_norm[key] = (mol[key] - fact[key]["mean"]) / fact[key]["std"]
+                    mol_norm[key] = torch.nan_to_num(mol_norm[key], nan = 0., posinf = 0., neginf = 0.)
+                elif key != "how_many" and len(mol[key]) == 0:
+                    if key == "H":
+                        mol_norm[key] = torch.rand(0, 2, 4)
+                    else:
+                        mol_norm[key] = torch.rand(0, 2, 34)
+            
+            # Agrego how many
+            mol_norm["how_many"] = mol["how_many"]
+
+            # Genero el arreglo normalizado
+            data_norm.append(mol_norm)
+
+        print(str(np.round(time.time(), 2)) + " s.")
+        return data_norm 
+
     def _read_norm(self):
-        if self.transform:
-            name = self.path_dir + "factors_norm_trans.pickle"
+        if self.grid_size != False:
+            if self.transform:
+                name = self.path_dir + "factors_norm_trans.pickle"
+            else:
+                name = self.path_dir + "factors_norm_untr.pickle"
+        elif self.coeff == True:
+            name = self.path_dir + "factors_norm.pickle"
         else:
-            name = self.path_dir + "factors_norm_untr.pickle"
+            print("Grid_size o Coeff debe elegirse como 'True'")
+            exit(-1)
+
         try:
             with open(name,"rb") as f:
                 factor_norm = pickle.load(f)
@@ -431,12 +596,12 @@ class DataModule(pl.LightningDataModule):
 
 # Modelos Atomicos
 class Linear_Model(pl.LightningModule):
-    def __init__(self, size):
+    def __init__(self, inp):
         super(Linear_Model, self).__init__()
 
-        self.nin = 4*(size**3)
+        self.inp = inp
         # Arquitectura de la NN
-        self.fc1 = nn.Linear(self.nin,1024)
+        self.fc1 = nn.Linear(self.inp,1024)
         self.fc2 = nn.Linear(1024,512)
         self.fc3 = nn.Linear(512,1)
 
@@ -444,7 +609,7 @@ class Linear_Model(pl.LightningModule):
 
     def forward(self,x):
         if len(x) != 0:
-            x = x.view(-1, self.nin)
+            x = x.view(-1, self.inp)
             out = self.act(self.fc1(x))
             out = self.act(self.fc2(out))
             out = self.fc3(out)
@@ -490,33 +655,44 @@ def conv_block(in_channels, out_channels, pool=False):
     if pool: layers.append(nn.MaxPool3d(2, 2))
     return nn.Sequential(*layers)
 
+def linear_block(inpp, outt):
+    layers = [nn.Linear(inpp, outt),
+              nn.PReLU()]
+    return nn.Sequential(*layers)
+
 class Res_Model(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, inp):
         super(Res_Model, self).__init__()
 
+        self.inp = inp
+
         # Arquitectura de la NN
-        self.conv1 = conv_block(4, 16)
-        self.conv2 = conv_block(16, 32, pool=True)
-        self.res1 = nn.Sequential(conv_block(32, 32), conv_block(32, 32))
+        self.conv1 = linear_block(self.inp, 1024)
+        self.conv2 = linear_block(1024, 512)
+        self.res1 = nn.Sequential(linear_block(512, 512), linear_block(512, 512))
+
+        self.conv3 = linear_block(512, 256)
+        self.conv4 = linear_block(256, 128)
+        self.res2 = nn.Sequential(linear_block(128, 128), linear_block(128, 128))
+
+        self.lin = nn.Linear(128,1)
         
-        self.conv3 = conv_block(32, 64)
-        self.conv4 = conv_block(64, 128)
-        self.res2 = nn.Sequential(conv_block(128, 128), conv_block(128, 128))
-        
-        self.classifier = nn.Sequential(nn.MaxPool3d(2, 2), 
-                                        nn.Flatten(), 
-                                        nn.Dropout(0.2),
-                                        nn.Linear(128, 1))
+        #self.classifier = nn.Sequential(nn.MaxPool3d(2, 2), 
+        #                                nn.Flatten(), 
+        #                                nn.Dropout(0.2),
+        #                                nn.Linear(128, 1))
 
     def forward(self,x):
         if len(x) != 0:
+            x = x.view(-1, self.inp)
             out = self.conv1(x)
             out = self.conv2(out)
             out = self.res1(out) + out
             out = self.conv3(out)
             out = self.conv4(out)
             out = self.res2(out) + out
-            out = self.classifier(out)
+            #out = self.classifier(out)
+            out = self.lin(out)
             return out
         else:
             out = torch.tensor([]).type_as(x)
@@ -533,23 +709,24 @@ class Modelo(pl.LightningModule):
         self.mod_type = self.hparams.Model
         self.size = self.hparams.grid_size
         self.batch_size = self.hparams.batch_size
+        self.coeff = self.hparams.coeff
         
         # Instanciamos los modelos de cada elemento
         if self.mod_type == "Linear":
-            self.Hydrogen  = Linear_Model(self.size)
-            self.Carbon    = Linear_Model(self.size)
-            self.Nitrogen  = Linear_Model(self.size)
-            self.Oxygen    = Linear_Model(self.size)
-        elif self.mod_type == "Conv":
+            self.Hydrogen  = Linear_Model(4)
+            self.Carbon    = Linear_Model(34)
+            self.Nitrogen  = Linear_Model(34)
+            self.Oxygen    = Linear_Model(34)
+        elif self.mod_type == "Conv" and self.coeff != True:
             self.Hydrogen  = Conv_Model()
             self.Carbon    = Conv_Model()
             self.Nitrogen  = Conv_Model()
             self.Oxygen    = Conv_Model()
         elif self.mod_type == "Res":
-            self.Hydrogen  = Res_Model()
-            self.Carbon    = Res_Model()
-            self.Nitrogen  = Res_Model()
-            self.Oxygen    = Res_Model()
+            self.Hydrogen  = Res_Model(4)
+            self.Carbon    = Res_Model(34)
+            self.Nitrogen  = Res_Model(34)
+            self.Oxygen    = Res_Model(34)
         else:
             print("Solo se permiten redes neuronales feedforward (Linear),\
                 convolucionales (Conv) o residuales (Res)")
