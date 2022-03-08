@@ -464,83 +464,39 @@ class DataModule(pl.LightningDataModule):
     def _get_norm_coeff(self, data):
         init = time.time()
         print("Calculando los factores de normalización", end = " ")
-        tempfact = {
-            "T": {"mean": [], "std": []},
-            "H": {"mean": [], "std": []}, 
-            "C": {"mean": [], "std": []},
-            "N": {"mean": [], "std": []}, 
-            "O": {"mean": [], "std": []},
-            "count": [],
-        }
-
+        
         fact = {
-            "T": {"mean": [], "std": []},
-            "H": {"mean": [], "std": []}, 
-            "C": {"mean": [], "std": []},
-            "N": {"mean": [], "std": []}, 
-            "O": {"mean": [], "std": []},
+            "T": {},
+            "H": {},
+            "C": {},
+            "N": {},
+            "O": {},
         }
 
         acum = {
             "T": [],
-            "H": [], 
+            "H": [],
             "C": [],
-            "N": [], 
+            "N": [],
             "O": [],
         }
 
-        # Para los datos, acumulamos targets y features en el diccionario acum
-        count = 0
+        # Para cada molécula en los datos, acumulamos el target y los features en
+        # el diccionario acum
+
         for mol in data:
-            count += 1
             for key in mol:
                 if key == "T":
-                    acum["T"].append(torch.unsqueeze(mol["T"],0))
+                    acum[key].append(mol[key].unsqueeze(0))
                 elif key != "how_many":
                     acum[key].append(mol[key])
-            if (count % 2500) == 0:
-                for key in acum:
-                    acum[key] = torch.cat(acum[key])
-                for key in acum:
-                    tempfact[key]["mean"].append(acum[key].mean(dim = 0))
-                    tempfact[key]["std"].append(acum[key].std(dim = 0))
 
-                tempfact["count"].append(count)
-                count = 0
-                del(acum)
-                acum = {
-                    "T": [],
-                    "H": [], 
-                    "C": [],
-                    "N": [], 
-                    "O": [],
-                }
-        
-        if (len(acum["T"]) != 0):
-            for key in acum:
-                    acum[key] = torch.cat(acum[key])
-            for key in acum:
-                tempfact[key]["mean"].append(acum[key].mean(dim = 0))
-                tempfact[key]["std"].append(acum[key].std(dim = 0))
-            
-            tempfact["count"].append(count)
-            del(acum)
-        
-        for key in tempfact:
-            if key != "count":
-                acmean = 0
-                bigsum = 0
-                for ii in range(len(tempfact[key]["mean"])):
-                    acmean += tempfact[key]["mean"][ii] * tempfact["count"][ii]
-                    bigsum += tempfact["count"][ii]
-                fact[key]["mean"] = acmean / bigsum
-                
-                acstd  = 0
-                bigsum = 0
-                for ii in range(len(tempfact[key]["std"])):
-                    acstd  += ((tempfact[key]["std"][ii])**2 + (tempfact[key]["mean"][ii] - fact[key]["mean"])**2) * (tempfact["count"][ii] - 1)
-                    bigsum += tempfact["count"][ii]
-                fact[key]["std"] = torch.sqrt(acstd / (bigsum - 1))  
+        # Generamos tensores con las listas para cada key, y calculamos la media y 
+        # desviación estándar:
+        for key in acum: 
+            acum[key] = torch.cat((acum[key]))
+            fact[key]["mean"] = acum[key].mean(dim = 0)
+            fact[key]["std"]  = acum[key].std(dim = 0)
 
         # Guardamos los factores de normalizacion en un archivo
         try:

@@ -277,14 +277,15 @@ class Predictor:
                                 for ii in field: proj.append(float(ii))
                 
                 # Cuando se termina de leer el archivo, se guardan los datos del cálculo convergido
-                data.append({
-                    "T": torch.tensor(KinE),
-                    "Atno": torch.tensor(Nuc),
-                    "Nucd": torch.tensor(Nucd),
-                    "How_many": torch.tensor(Hw),
-                    "Coeff": torch.tensor(coeff),
-                    "Proj": torch.tensor(proj),
-                })
+                if len(KinE) != 0:
+                    data.append({
+                        "T": torch.tensor(KinE),
+                        "Atno": torch.tensor(Nuc),
+                        "Nucd": torch.tensor(Nucd),
+                        "How_many": torch.tensor(Hw),
+                        "Coeff": torch.tensor(coeff),
+                        "Proj": torch.tensor(proj),
+                    })
 
                 #except:
                 #    print("El archivo {} no existe".format(file_name))
